@@ -1,0 +1,22 @@
+.env
+.env.*
+!.env.example
+
+# Go build and test output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage*.txt
+
+# Local tooling
+.idea/
+.vscode/
+*.swp
+*.tmp
+.DS_Store
+Thumbs.db
+
