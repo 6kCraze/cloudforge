@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V1: one Go API, one PostgreSQL-backed polling worker, and a deterministic synthetic workload.** PostgreSQL is the authoritative source of truth for every job lifecycle transition.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.1 infrastructure with the V1 job flow unchanged.** One Go API and one PostgreSQL-polling worker execute a deterministic synthetic workload. PostgreSQL is the authoritative source of truth for every job lifecycle transition. RabbitMQ is available locally for the messaging work that begins in later V2 checkpoints.
 
-The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the request flow, lifecycle, atomic claim transaction, and intentional crash limitation.
+The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the current request flow, lifecycle, atomic claim transaction, and intentional crash limitation. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker and reserved topology.
 
 ## Prerequisites
 
@@ -17,7 +17,7 @@ Run these commands in the repository root:
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up -d --wait db
+docker compose up -d --wait db rabbitmq
 . .\scripts\load-env.ps1
 go run ./cmd/migrate up
 go test ./...
@@ -25,6 +25,8 @@ go test -tags=integration ./...
 ```
 
 The `.env` file contains local development credentials and is ignored by Git. Docker Compose reads it for PostgreSQL, while Go reads process environment variables. Dot-source `scripts/load-env.ps1` in each new PowerShell session before starting a Go command.
+
+RabbitMQ's local management UI is available at [http://localhost:15672](http://localhost:15672). With an unchanged `.env.example`, sign in with username `cloudforge` and password `cloudforge_dev_only`. These credentials are only for local development. Use the **Exchanges** and **Queues and Streams** tabs to inspect topology. A queue page shows ready messages, unacknowledged messages, consumers, and message rates. V2.1 does not declare the CloudForge topology yet, so application queues appear when the later dispatcher and worker checkpoints introduce them.
 
 ## Run V1
 
@@ -87,7 +89,7 @@ Ctrl+C is different: graceful shutdown stops new polling and lets the current cl
 ## Everyday commands
 
 ```powershell
-docker compose up -d --wait db
+docker compose up -d --wait db rabbitmq
 docker compose ps
 . .\scripts\load-env.ps1
 go run ./cmd/dbcheck
@@ -123,4 +125,4 @@ client -> Go API -> PostgreSQL jobs table <- polling Go worker
 - `internal/worker` owns polling and graceful shutdown behavior.
 - `cmd/migrate` applies reversible Goose migrations.
 
-RabbitMQ is intentionally absent in V1. When introduced later it will deliver work, while PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
+RabbitMQ now runs as V2.1 local infrastructure but is not connected to the V1 application flow. Later V2 checkpoints will use it for work delivery while PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
