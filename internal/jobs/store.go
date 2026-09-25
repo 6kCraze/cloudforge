@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/6kCraze/cloudforge/internal/outbox"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -19,20 +21,44 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 func (s *Store) Create(ctx context.Context, input CreateInput) (Job, error) {
-	payload, err := json.Marshal(input.Payload)
+	jobID := uuid.NewString()
+	eventID := uuid.NewString()
+
+	jobPayload, err := json.Marshal(input.Payload)
 	if err != nil {
 		return Job{}, fmt.Errorf("encode job payload: %w", err)
 	}
+	eventPayload, err := json.Marshal(outbox.JobReadyPayload{JobID: jobID})
+	if err != nil {
+		return Job{}, fmt.Errorf("encode outbox payload: %w", err)
+	}
 
-	row := s.pool.QueryRow(ctx, `
-		INSERT INTO cloudforge.jobs (type, payload)
-		VALUES ($1, $2)
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Job{}, fmt.Errorf("begin job creation transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO cloudforge.jobs (id, type, payload)
+		VALUES ($1, $2, $3)
 		RETURNING `+jobColumns,
-		input.Type, payload,
+		jobID, input.Type, jobPayload,
 	)
 	job, err := scanJob(row)
 	if err != nil {
 		return Job{}, fmt.Errorf("insert job: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cloudforge.outbox_events (id, event_type, aggregate_id, payload)
+		VALUES ($1, $2, $3, $4)
+	`, eventID, outbox.EventTypeJobReady, jobID, eventPayload); err != nil {
+		return Job{}, fmt.Errorf("insert outbox event: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, fmt.Errorf("commit job creation transaction: %w", err)
 	}
 	return job, nil
 }

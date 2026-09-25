@@ -24,7 +24,19 @@ func TestProcessorErrorPersistsFailedJob(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.jobs`); err != nil {
+	lockConn, err := pool.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockConn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, int64(240022)); err != nil {
+		lockConn.Release()
+		t.Fatal(err)
+	}
+	defer func() {
+		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, int64(240022))
+		lockConn.Release()
+	}()
+	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.1 infrastructure with the V1 job flow unchanged.** One Go API and one PostgreSQL-polling worker execute a deterministic synthetic workload. PostgreSQL is the authoritative source of truth for every job lifecycle transition. RabbitMQ is available locally for the messaging work that begins in later V2 checkpoints.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.2 transactional outbox with the V1 polling worker unchanged.** Job creation atomically records both the queued job and its future publication intent in PostgreSQL. PostgreSQL remains authoritative for every job lifecycle transition. RabbitMQ is available locally but is not used by application code yet.
 
-The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the current request flow, lifecycle, atomic claim transaction, and intentional crash limitation. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker and reserved topology.
+The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the current worker flow and intentional crash limitation. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker and reserved topology. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent.
 
 ## Prerequisites
 
@@ -126,3 +126,17 @@ client -> Go API -> PostgreSQL jobs table <- polling Go worker
 - `cmd/migrate` applies reversible Goose migrations.
 
 RabbitMQ now runs as V2.1 local infrastructure but is not connected to the V1 application flow. Later V2 checkpoints will use it for work delivery while PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
+
+## V2.2 transactional outbox
+
+`POST /v1/jobs` now performs one PostgreSQL transaction: it inserts the queued job, inserts one matching `job.ready` outbox event, and commits both together before returning `202 Accepted`. If either insert or the commit fails, neither row remains. The API response is unchanged and does not expose the internal event.
+
+The outbox payload contains only the authoritative job ID:
+
+```json
+{"job_id":"28a3e40d-d025-4c22-b142-e359982e3f39"}
+```
+
+The event's ID and type are first-class columns. V2.3 can map them to RabbitMQ metadata and routing rather than duplicating them in the JSON body.
+
+Every new outbox row intentionally has `published_at = NULL`. No dispatcher or RabbitMQ publisher exists in V2.2. The existing worker continues polling the `jobs` table and can complete the job while its outbox event remains unpublished. Job submission also continues to work when RabbitMQ is stopped.

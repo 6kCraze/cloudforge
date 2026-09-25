@@ -10,8 +10,11 @@ import (
 	"testing"
 
 	"github.com/6kCraze/cloudforge/internal/database"
+	"github.com/6kCraze/cloudforge/internal/outbox"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const integrationAdvisoryLockID int64 = 240022
 
 func integrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -24,8 +27,20 @@ func integrationPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.jobs`); err != nil {
-		t.Fatalf("truncate jobs: %v", err)
+	lockConn, err := pool.Acquire(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockConn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, integrationAdvisoryLockID); err != nil {
+		lockConn.Release()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationAdvisoryLockID)
+		lockConn.Release()
+	})
+	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+		t.Fatalf("truncate job data: %v", err)
 	}
 	return pool
 }
@@ -43,7 +58,8 @@ func createTestJob(t *testing.T, store *Store) Job {
 }
 
 func TestStoreCreateAndGet(t *testing.T) {
-	store := NewStore(integrationPool(t))
+	pool := integrationPool(t)
+	store := NewStore(pool)
 	created := createTestJob(t, store)
 	if created.Status != StatusQueued || created.AttemptCount != 0 {
 		t.Fatalf("created job = %#v", created)
@@ -55,6 +71,87 @@ func TestStoreCreateAndGet(t *testing.T) {
 	}
 	if got.ID != created.ID || got.Status != StatusQueued {
 		t.Fatalf("got job = %#v", got)
+	}
+
+	var eventID, eventType, aggregateID string
+	var eventPayload json.RawMessage
+	var publishedAt any
+	err = pool.QueryRow(context.Background(), `
+		SELECT id::text, event_type, aggregate_id::text, payload, published_at
+		FROM cloudforge.outbox_events
+		WHERE aggregate_id = $1
+	`, created.ID).Scan(&eventID, &eventType, &aggregateID, &eventPayload, &publishedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decodedPayload outbox.JobReadyPayload
+	if err := json.Unmarshal(eventPayload, &decodedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if eventID == "" || eventType != outbox.EventTypeJobReady || aggregateID != created.ID || decodedPayload.JobID != created.ID || publishedAt != nil {
+		t.Fatalf("outbox event: id=%q type=%q aggregate=%q payload=%s published=%v", eventID, eventType, aggregateID, eventPayload, publishedAt)
+	}
+	var jobCount, eventCount int
+	if err := pool.QueryRow(context.Background(), `SELECT
+		(SELECT count(*) FROM cloudforge.jobs WHERE id = $1),
+		(SELECT count(*) FROM cloudforge.outbox_events WHERE aggregate_id = $1)
+	`, created.ID).Scan(&jobCount, &eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if jobCount != 1 || eventCount != 1 {
+		t.Fatalf("job count=%d event count=%d, want 1 each", jobCount, eventCount)
+	}
+}
+
+func TestCreateRollsBackJobWhenOutboxInsertFails(t *testing.T) {
+	pool := integrationPool(t)
+	ctx := context.Background()
+	_, err := pool.Exec(ctx, `
+		CREATE FUNCTION cloudforge.test_reject_selected_outbox_event()
+		RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM cloudforge.jobs
+				WHERE id = NEW.aggregate_id
+				  AND payload->>'text' = 'force-outbox-rollback-test'
+			) THEN
+				RAISE EXCEPTION 'intentional outbox insertion failure';
+			END IF;
+			RETURN NEW;
+		END;
+		$$;
+		CREATE TRIGGER test_reject_selected_outbox_event
+		BEFORE INSERT ON cloudforge.outbox_events
+		FOR EACH ROW EXECUTE FUNCTION cloudforge.test_reject_selected_outbox_event();
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `
+			DROP TRIGGER IF EXISTS test_reject_selected_outbox_event ON cloudforge.outbox_events;
+			DROP FUNCTION IF EXISTS cloudforge.test_reject_selected_outbox_event();
+		`)
+	})
+
+	store := NewStore(pool)
+	_, err = store.Create(ctx, CreateInput{
+		Type:    TypeSyntheticSHA256,
+		Payload: SHA256Payload{Text: "force-outbox-rollback-test", Iterations: 10},
+	})
+	if err == nil {
+		t.Fatal("Create() succeeded, want outbox insertion error")
+	}
+
+	var jobCount, eventCount int
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM cloudforge.jobs),
+		(SELECT count(*) FROM cloudforge.outbox_events)
+	`).Scan(&jobCount, &eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if jobCount != 0 || eventCount != 0 {
+		t.Fatalf("job count=%d event count=%d, want both zero", jobCount, eventCount)
 	}
 }
 
