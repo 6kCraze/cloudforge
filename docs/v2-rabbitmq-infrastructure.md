@@ -1,6 +1,6 @@
 # V2.1 RabbitMQ infrastructure
 
-V2.1 adds RabbitMQ to the local Docker Compose environment without changing the V1 job-processing path. The API still writes jobs to PostgreSQL and the worker still polls PostgreSQL. The outbox, dispatcher, RabbitMQ consumer, and acknowledgements begin in later V2 checkpoints.
+V2.1 added RabbitMQ to the local Docker Compose environment without changing the V1 job-processing path. V2.2 added the outbox, and V2.3 now declares the topology and publishes messages. The worker continues polling PostgreSQL until V2.4.
 
 ## Why RabbitMQ
 
@@ -8,7 +8,7 @@ PostgreSQL polling repeatedly asks whether work exists, adding idle database tra
 
 PostgreSQL remains authoritative for job status, payload, result, and application failure history. RabbitMQ does not provide an atomic commit with the PostgreSQL transaction, exactly-once execution, or canonical application lifecycle state. V2.2 introduces a transactional outbox so a committed job cannot lose its publication intent when RabbitMQ is unavailable.
 
-## Terms and proposed topology
+## Terms and topology
 
 - An **exchange** receives publications from a producer and routes them according to its type and bindings.
 - A **queue** holds routed messages until a consumer handles them.
@@ -19,7 +19,7 @@ PostgreSQL remains authoritative for job status, payload, result, and applicatio
 - A **durable queue** retains its definition across broker restarts.
 - A **persistent message** asks RabbitMQ to persist that message. Durable queues and persistent messages address different parts of restart durability and will be used together.
 
-The reserved V2 topology is deliberately small:
+The V2 topology is deliberately small:
 
 | Component | Name |
 | --- | --- |
@@ -27,7 +27,7 @@ The reserved V2 topology is deliberately small:
 | Durable queue | `cloudforge.jobs.v1` |
 | Binding routing key | `job.ready` |
 
-V2.1 does not declare this topology. The later messaging code will declare it idempotently when connecting, so the components that depend on the topology also verify it exists.
+The V2.3 dispatcher declares this topology idempotently whenever it connects. Repeating the exact same durable declarations is safe; RabbitMQ returns an error if a declaration conflicts with the existing topology instead of silently changing it.
 
 ## Local service
 

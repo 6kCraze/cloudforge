@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.2 transactional outbox with the V1 polling worker unchanged.** Job creation atomically records both the queued job and its future publication intent in PostgreSQL. PostgreSQL remains authoritative for every job lifecycle transition. RabbitMQ is available locally but is not used by application code yet.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.3 outbox dispatch with the V1 polling worker unchanged.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A separate dispatcher reliably publishes that intent to RabbitMQ with at-least-once semantics. PostgreSQL remains authoritative for every job lifecycle transition.
 
-The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the current worker flow and intentional crash limitation. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker and reserved topology. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent.
+The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the current worker flow and intentional crash limitation. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed RabbitMQ publication and its deliberate duplicate window.
 
 ## Prerequisites
 
@@ -26,11 +26,11 @@ go test -tags=integration ./...
 
 The `.env` file contains local development credentials and is ignored by Git. Docker Compose reads it for PostgreSQL, while Go reads process environment variables. Dot-source `scripts/load-env.ps1` in each new PowerShell session before starting a Go command.
 
-RabbitMQ's local management UI is available at [http://localhost:15672](http://localhost:15672). With an unchanged `.env.example`, sign in with username `cloudforge` and password `cloudforge_dev_only`. These credentials are only for local development. Use the **Exchanges** and **Queues and Streams** tabs to inspect topology. A queue page shows ready messages, unacknowledged messages, consumers, and message rates. V2.1 does not declare the CloudForge topology yet, so application queues appear when the later dispatcher and worker checkpoints introduce them.
+RabbitMQ's local management UI is available at [http://localhost:15672](http://localhost:15672). With an unchanged `.env.example`, sign in with username `cloudforge` and password `cloudforge_dev_only`. These credentials are only for local development. Starting `cmd/dispatcher` declares the V2.3 topology. Use the **Exchanges** and **Queues and Streams** tabs to inspect it. During V2.3, `cloudforge.jobs.v1` has zero consumers and its ready count increases as events publish.
 
-## Run V1
+## Run V2.3 locally
 
-Open two PowerShell terminals in the repository root and load the environment in each.
+Open three PowerShell terminals in the repository root and load the environment in each.
 
 Terminal 1:
 
@@ -44,6 +44,13 @@ Terminal 2:
 ```powershell
 . .\scripts\load-env.ps1
 go run ./cmd/worker
+```
+
+Terminal 3:
+
+```powershell
+. .\scripts\load-env.ps1
+go run ./cmd/dispatcher
 ```
 
 Submit and inspect a job from a third terminal:
@@ -125,7 +132,7 @@ client -> Go API -> PostgreSQL jobs table <- polling Go worker
 - `internal/worker` owns polling and graceful shutdown behavior.
 - `cmd/migrate` applies reversible Goose migrations.
 
-RabbitMQ now runs as V2.1 local infrastructure but is not connected to the V1 application flow. Later V2 checkpoints will use it for work delivery while PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
+RabbitMQ carries V2.3 `job.ready` notifications, while the V1 worker still polls PostgreSQL and does not consume them. PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
 
 ## V2.2 transactional outbox
 
@@ -140,3 +147,11 @@ The outbox payload contains only the authoritative job ID:
 The event's ID and type are first-class columns. V2.3 can map them to RabbitMQ metadata and routing rather than duplicating them in the JSON body.
 
 Every new outbox row intentionally has `published_at = NULL`. No dispatcher or RabbitMQ publisher exists in V2.2. The existing worker continues polling the `jobs` table and can complete the job while its outbox event remains unpublished. Job submission also continues to work when RabbitMQ is stopped.
+
+## V2.3 confirmed publication
+
+`cmd/dispatcher` reads a small ordered batch of unpublished events and processes it sequentially. It logs and leaves malformed events unpublished while continuing to valid later events in the batch. Each valid event is published as a persistent message to the durable `cloudforge.jobs` exchange with routing key `job.ready`, and the dispatcher waits for a RabbitMQ publisher confirmation. Mandatory publishing also detects a missing route. Only a routed broker ACK is followed by the conditional `published_at` update.
+
+The dispatcher never keeps a PostgreSQL transaction or row lock open while waiting for RabbitMQ. It reconnects with capped exponential backoff and idempotently redeclares the durable exchange, queue, and binding. RabbitMQ has no CloudForge consumer in V2.3, so ready messages accumulate while the existing worker independently completes jobs by polling PostgreSQL.
+
+RabbitMQ confirmation and the database update cannot be atomic. A crash between them leaves `published_at` NULL and causes the same event to publish again. The stable outbox UUID in RabbitMQ `message_id` makes this duplicate observable. This is at-least-once publication; V2.4 will make consumption safe in the presence of duplicates.
