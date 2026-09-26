@@ -121,6 +121,32 @@ func (s *Store) ClaimNext(ctx context.Context, workerID string) (Job, error) {
 	return job, nil
 }
 
+// ClaimByID atomically transitions one specifically delivered queued job to
+// running. RabbitMQ may deliver the same job more than once, so the status
+// predicate is the database-backed deduplication guard.
+func (s *Store) ClaimByID(ctx context.Context, id, workerID string) (Job, error) {
+	row := s.pool.QueryRow(ctx, `
+		UPDATE cloudforge.jobs
+		SET status = 'running',
+			attempt_count = attempt_count + 1,
+			claimed_by = $2,
+			started_at = now(),
+			updated_at = now()
+		WHERE id = $1
+		  AND status = 'queued'
+		RETURNING `+jobColumns,
+		id, workerID,
+	)
+	job, err := scanJob(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Job{}, ErrNotClaimable
+	}
+	if err != nil {
+		return Job{}, fmt.Errorf("claim job by ID: %w", err)
+	}
+	return job, nil
+}
+
 func (s *Store) MarkSucceeded(ctx context.Context, id, workerID string, result json.RawMessage) error {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE cloudforge.jobs

@@ -4,83 +4,255 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/6kCraze/cloudforge/internal/jobs"
+	"github.com/6kCraze/cloudforge/internal/outbox"
+	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type JobStore interface {
-	ClaimNext(context.Context, string) (jobs.Job, error)
+	Get(context.Context, string) (jobs.Job, error)
+	ClaimByID(context.Context, string, string) (jobs.Job, error)
 	MarkSucceeded(context.Context, string, string, json.RawMessage) error
 	MarkFailed(context.Context, string, string, string, string) error
 }
 
 type Processor func(context.Context, jobs.Job) (json.RawMessage, error)
 
-type Worker struct {
-	store        JobStore
-	workerID     string
-	pollInterval time.Duration
-	processor    Processor
-	logger       *slog.Logger
+type Outcome string
+
+const (
+	OutcomeExecuted          Outcome = "executed"
+	OutcomeTerminalDuplicate Outcome = "terminal_duplicate"
+	OutcomeRunningDeferred   Outcome = "running_deferred"
+	OutcomeUnknownJob        Outcome = "unknown_job"
+)
+
+type Handler struct {
+	store     JobStore
+	workerID  string
+	processor Processor
+	logger    *slog.Logger
 }
 
-func New(store JobStore, workerID string, pollInterval time.Duration, processor Processor, logger *slog.Logger) *Worker {
-	return &Worker{store: store, workerID: workerID, pollInterval: pollInterval, processor: processor, logger: logger}
+func NewHandler(store JobStore, workerID string, processor Processor, logger *slog.Logger) *Handler {
+	return &Handler{store: store, workerID: workerID, processor: processor, logger: logger}
 }
 
-func (w *Worker) Run(ctx context.Context) error {
-	w.logger.Info("worker started", "worker_id", w.workerID, "poll_interval", w.pollInterval)
+// Handle reconciles a RabbitMQ delivery with PostgreSQL before doing work.
+// PostgreSQL is authoritative: only queued jobs can be claimed and executed.
+func (h *Handler) Handle(ctx context.Context, jobID string) (Outcome, error) {
+	// The second pass handles the narrow race where another duplicate delivery
+	// changes queued state between Get and ClaimByID.
+	for pass := 0; pass < 2; pass++ {
+		job, err := h.store.Get(ctx, jobID)
+		if errors.Is(err, jobs.ErrNotFound) {
+			h.logger.Warn("unknown job delivery", "job_id", jobID, "worker_id", h.workerID)
+			return OutcomeUnknownJob, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("load delivered job: %w", err)
+		}
+
+		switch job.Status {
+		case jobs.StatusSucceeded, jobs.StatusFailed:
+			h.logger.Info("terminal duplicate skipped", "job_id", jobID, "worker_id", h.workerID, "status", job.Status)
+			return OutcomeTerminalDuplicate, nil
+		case jobs.StatusRunning:
+			h.logger.Warn("running job delivery deferred", "job_id", jobID, "worker_id", h.workerID, "status", job.Status, "claimed_by", job.ClaimedBy)
+			return OutcomeRunningDeferred, nil
+		case jobs.StatusQueued:
+			claimed, claimErr := h.store.ClaimByID(ctx, jobID, h.workerID)
+			if errors.Is(claimErr, jobs.ErrNotClaimable) {
+				continue
+			}
+			if claimErr != nil {
+				return "", fmt.Errorf("claim delivered job: %w", claimErr)
+			}
+			h.logger.Info("job claimed", "job_id", jobID, "worker_id", h.workerID, "status", claimed.Status, "attempt_count", claimed.AttemptCount)
+			return h.execute(ctx, claimed)
+		default:
+			return "", fmt.Errorf("job %s has unsupported status %q", jobID, job.Status)
+		}
+	}
+	return "", fmt.Errorf("claim delivered job: state remained queued after a competing claim")
+}
+
+func (h *Handler) execute(ctx context.Context, job jobs.Job) (Outcome, error) {
+	h.logger.Info("job started", "job_id", job.ID, "worker_id", h.workerID, "attempt_count", job.AttemptCount)
+	result, err := h.processor(ctx, job)
+	if err != nil {
+		if markErr := h.store.MarkFailed(ctx, job.ID, h.workerID, "execution_failed", err.Error()); markErr != nil {
+			return "", fmt.Errorf("record job failure: %w", markErr)
+		}
+		h.logger.Warn("job failed", "job_id", job.ID, "worker_id", h.workerID, "status", jobs.StatusFailed, "error", err)
+		return OutcomeExecuted, nil
+	}
+	if err := h.store.MarkSucceeded(ctx, job.ID, h.workerID, result); err != nil {
+		return "", fmt.Errorf("record job success: %w", err)
+	}
+	h.logger.Info("job completed", "job_id", job.ID, "worker_id", h.workerID, "status", jobs.StatusSucceeded)
+	return OutcomeExecuted, nil
+}
+
+type DeliveryConsumer interface {
+	Deliveries() <-chan amqp.Delivery
+	Done() <-chan error
+	Cancel() error
+	Close() error
+}
+
+type Connector func(context.Context) (DeliveryConsumer, error)
+
+type RabbitWorker struct {
+	handler    *Handler
+	connect    Connector
+	workerID   string
+	backoffMin time.Duration
+	backoffMax time.Duration
+	logger     *slog.Logger
+}
+
+func NewRabbitWorker(handler *Handler, connect Connector, workerID string, backoffMin, backoffMax time.Duration, logger *slog.Logger) *RabbitWorker {
+	return &RabbitWorker{handler: handler, connect: connect, workerID: workerID, backoffMin: backoffMin, backoffMax: backoffMax, logger: logger}
+}
+
+func (w *RabbitWorker) Run(ctx context.Context) error {
+	w.logger.Info("worker started", "worker_id", w.workerID, "source", "rabbitmq")
 	defer w.logger.Info("worker stopped", "worker_id", w.workerID)
 
-	for {
+	backoff := w.backoffMin
+	hasConnected := false
+	for ctx.Err() == nil {
+		consumer, err := w.connect(ctx)
+		if err != nil {
+			w.logger.Error("broker connection failed", "worker_id", w.workerID, "error", err, "retry_in", backoff)
+			if !wait(ctx, backoff) {
+				return nil
+			}
+			backoff = nextBackoff(backoff, w.backoffMax)
+			continue
+		}
+		if hasConnected {
+			w.logger.Info("broker reconnected", "worker_id", w.workerID)
+		} else {
+			w.logger.Info("broker connected", "worker_id", w.workerID)
+		}
+		hasConnected = true
+		backoff = w.backoffMin
+
+		cancelFinished := make(chan struct{})
+		stopCancel := context.AfterFunc(ctx, func() {
+			_ = consumer.Cancel()
+			close(cancelFinished)
+		})
+		err = w.consume(ctx, consumer)
+		if !stopCancel() {
+			<-cancelFinished
+		}
+		_ = consumer.Close()
 		if ctx.Err() != nil {
 			return nil
 		}
-
-		processed, err := w.ProcessOne(ctx)
 		if err != nil {
-			w.logger.Error("worker cycle failed", "worker_id", w.workerID, "error", err)
+			w.logger.Warn("consumer interrupted", "worker_id", w.workerID, "error", err, "retry_in", backoff)
 		}
-		if processed {
-			continue
+		if !wait(ctx, backoff) {
+			return nil
 		}
+		backoff = nextBackoff(backoff, w.backoffMax)
+	}
+	return nil
+}
 
-		timer := time.NewTimer(w.pollInterval)
+func (w *RabbitWorker) consume(ctx context.Context, consumer DeliveryConsumer) error {
+	for {
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
 			return nil
-		case <-timer.C:
+		case err, ok := <-consumer.Done():
+			if ok && err != nil {
+				return err
+			}
+			return errors.New("RabbitMQ consumer closed")
+		case delivery, ok := <-consumer.Deliveries():
+			if !ok {
+				return errors.New("RabbitMQ deliveries closed")
+			}
+			// Once accepted locally, graceful cancellation must not interrupt the
+			// database terminal update or the following acknowledgement.
+			if err := w.handleDelivery(context.WithoutCancel(ctx), delivery); err != nil {
+				return err
+			}
 		}
 	}
 }
 
-func (w *Worker) ProcessOne(ctx context.Context) (bool, error) {
-	job, err := w.store.ClaimNext(ctx, w.workerID)
-	if errors.Is(err, jobs.ErrNoJobs) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
+func (w *RabbitWorker) handleDelivery(ctx context.Context, delivery amqp.Delivery) error {
+	jobID, validationErr := validateDelivery(delivery)
+	w.logger.Info("message received", "worker_id", w.workerID, "job_id", jobID, "message_id", delivery.MessageId, "delivery_tag", delivery.DeliveryTag, "redelivered", delivery.Redelivered)
+	if validationErr != nil {
+		w.logger.Error("malformed message dropped", "worker_id", w.workerID, "message_id", delivery.MessageId, "delivery_tag", delivery.DeliveryTag, "error", validationErr)
+		if err := delivery.Ack(false); err != nil {
+			return fmt.Errorf("ack malformed message: %w", err)
+		}
+		return nil
 	}
 
-	// Once claimed, graceful cancellation must not interrupt the terminal update.
-	workCtx := context.WithoutCancel(ctx)
-	result, err := w.processor(workCtx, job)
+	outcome, err := w.handler.Handle(ctx, jobID)
 	if err != nil {
-		if markErr := w.store.MarkFailed(workCtx, job.ID, w.workerID, "execution_failed", err.Error()); markErr != nil {
-			return true, markErr
+		w.logger.Error("message processing deferred", "worker_id", w.workerID, "job_id", jobID, "message_id", delivery.MessageId, "error", err)
+		if nackErr := delivery.Nack(false, true); nackErr != nil {
+			return fmt.Errorf("process job: %v; nack delivery: %w", err, nackErr)
 		}
-		w.logger.Warn("job failed", "job_id", job.ID, "worker_id", w.workerID, "error", err)
-		return true, nil
+		w.logger.Warn("message negatively acknowledged", "worker_id", w.workerID, "job_id", jobID, "message_id", delivery.MessageId, "requeue", true)
+		return fmt.Errorf("process job %s: %w", jobID, err)
 	}
-	if err := w.store.MarkSucceeded(workCtx, job.ID, w.workerID, result); err != nil {
-		return true, err
+	if err := delivery.Ack(false); err != nil {
+		return fmt.Errorf("ack job %s: %w", jobID, err)
 	}
-	w.logger.Info("job succeeded", "job_id", job.ID, "worker_id", w.workerID)
-	return true, nil
+	w.logger.Info("message acknowledged", "worker_id", w.workerID, "job_id", jobID, "message_id", delivery.MessageId, "outcome", outcome)
+	return nil
+}
+
+func validateDelivery(delivery amqp.Delivery) (string, error) {
+	if delivery.ContentType != "application/json" {
+		return "", fmt.Errorf("content_type must be application/json")
+	}
+	if delivery.Type != outbox.EventTypeJobReady {
+		return "", fmt.Errorf("type must be %s", outbox.EventTypeJobReady)
+	}
+	if _, err := uuid.Parse(delivery.MessageId); err != nil {
+		return "", fmt.Errorf("message_id must be a UUID")
+	}
+	var payload outbox.JobReadyPayload
+	if err := json.Unmarshal(delivery.Body, &payload); err != nil {
+		return "", fmt.Errorf("decode body: %w", err)
+	}
+	if _, err := uuid.Parse(payload.JobID); err != nil {
+		return "", fmt.Errorf("job_id must be a UUID")
+	}
+	return payload.JobID, nil
+}
+
+func wait(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func nextBackoff(current, maximum time.Duration) time.Duration {
+	if current >= maximum/2 {
+		return maximum
+	}
+	return current * 2
 }

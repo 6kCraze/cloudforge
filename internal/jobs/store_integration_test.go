@@ -198,6 +198,49 @@ func TestConcurrentClaimOnlyOneWorkerWins(t *testing.T) {
 	}
 }
 
+func TestConcurrentClaimByIDOnlyOneWorkerWins(t *testing.T) {
+	store := NewStore(integrationPool(t))
+	created := createTestJob(t, store)
+
+	type outcome struct {
+		job Job
+		err error
+	}
+	start := make(chan struct{})
+	outcomes := make(chan outcome, 2)
+	var wg sync.WaitGroup
+	for _, workerID := range []string{"worker-a", "worker-b"} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			<-start
+			job, err := store.ClaimByID(context.Background(), created.ID, id)
+			outcomes <- outcome{job: job, err: err}
+		}(workerID)
+	}
+	close(start)
+	wg.Wait()
+	close(outcomes)
+
+	wins, rejected := 0, 0
+	for result := range outcomes {
+		switch result.err {
+		case nil:
+			wins++
+			if result.job.ID != created.ID || result.job.Status != StatusRunning || result.job.AttemptCount != 1 {
+				t.Fatalf("claimed job = %#v", result.job)
+			}
+		case ErrNotClaimable:
+			rejected++
+		default:
+			t.Fatal(result.err)
+		}
+	}
+	if wins != 1 || rejected != 1 {
+		t.Fatalf("wins=%d rejected=%d, want 1 and 1", wins, rejected)
+	}
+}
+
 func TestSuccessfulResultPersists(t *testing.T) {
 	store := NewStore(integrationPool(t))
 	created := createTestJob(t, store)

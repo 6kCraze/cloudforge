@@ -20,8 +20,9 @@ const (
 )
 
 var (
-	ErrNotFound = errors.New("job not found")
-	ErrNoJobs   = errors.New("no queued jobs")
+	ErrNotFound     = errors.New("job not found")
+	ErrNoJobs       = errors.New("no queued jobs")
+	ErrNotClaimable = errors.New("job is not queued")
 )
 
 type SHA256Payload struct {

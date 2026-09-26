@@ -15,7 +15,8 @@ type Config struct {
 	AppEnv                   string
 	HTTPPort                 int
 	WorkerID                 string
-	WorkerPollInterval       time.Duration
+	WorkerBackoffMin         time.Duration
+	WorkerBackoffMax         time.Duration
 	DispatcherPollInterval   time.Duration
 	DispatcherConfirmTimeout time.Duration
 	DispatcherBackoffMin     time.Duration
@@ -42,13 +43,13 @@ func Load() (Config, error) {
 		httpPort = port
 	}
 
-	pollInterval := 500 * time.Millisecond
-	if raw := strings.TrimSpace(os.Getenv("WORKER_POLL_INTERVAL")); raw != "" {
-		parsed, err := time.ParseDuration(raw)
-		if err != nil || parsed < 10*time.Millisecond {
-			return Config{}, fmt.Errorf("WORKER_POLL_INTERVAL must be a duration of at least 10ms")
-		}
-		pollInterval = parsed
+	workerBackoffMin, err := durationEnv("WORKER_BACKOFF_MIN", 250*time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		return Config{}, err
+	}
+	workerBackoffMax, err := durationEnv("WORKER_BACKOFF_MAX", 5*time.Second, workerBackoffMin)
+	if err != nil {
+		return Config{}, err
 	}
 
 	dispatcherPollInterval, err := durationEnv("DISPATCHER_POLL_INTERVAL", 500*time.Millisecond, 10*time.Millisecond)
@@ -74,7 +75,8 @@ func Load() (Config, error) {
 		AppEnv:                   appEnv,
 		HTTPPort:                 httpPort,
 		WorkerID:                 strings.TrimSpace(os.Getenv("WORKER_ID")),
-		WorkerPollInterval:       pollInterval,
+		WorkerBackoffMin:         workerBackoffMin,
+		WorkerBackoffMax:         workerBackoffMax,
 		DispatcherPollInterval:   dispatcherPollInterval,
 		DispatcherConfirmTimeout: dispatcherConfirmTimeout,
 		DispatcherBackoffMin:     dispatcherBackoffMin,

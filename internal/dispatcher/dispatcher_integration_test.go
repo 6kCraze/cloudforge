@@ -41,7 +41,9 @@ func newIntegrationFixture(t *testing.T) *integrationFixture {
 	if cfg.RabbitMQURL == "" {
 		t.Fatal("RABBITMQ_URL is required for dispatcher integration tests")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Integration packages share one database and RabbitMQ queue. A longer
+	// setup deadline lets the advisory lock serialize packages under `go test ./...`.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	pool, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {

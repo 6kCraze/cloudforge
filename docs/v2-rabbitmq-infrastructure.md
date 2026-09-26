@@ -1,6 +1,6 @@
 # V2.1 RabbitMQ infrastructure
 
-V2.1 added RabbitMQ to the local Docker Compose environment without changing the V1 job-processing path. V2.2 added the outbox, and V2.3 now declares the topology and publishes messages. The worker continues polling PostgreSQL until V2.4.
+V2.1 added RabbitMQ to the local Docker Compose environment without changing the V1 job-processing path. V2.2 added the outbox, V2.3 added confirmed publication, and V2.4 adds manual-ACK worker consumption.
 
 ## Why RabbitMQ
 
@@ -15,7 +15,7 @@ PostgreSQL remains authoritative for job status, payload, result, and applicatio
 - A **binding** connects an exchange to a queue.
 - A **routing key** is the label a direct exchange compares with bindings.
 - The **producer** will be the V2.3 outbox dispatcher.
-- The **consumer** will be the V2.4 worker.
+- The **consumer** is the V2.4 worker.
 - A **durable queue** retains its definition across broker restarts.
 - A **persistent message** asks RabbitMQ to persist that message. Durable queues and persistent messages address different parts of restart durability and will be used together.
 

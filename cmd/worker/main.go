@@ -11,6 +11,7 @@ import (
 	"github.com/6kCraze/cloudforge/internal/config"
 	"github.com/6kCraze/cloudforge/internal/database"
 	"github.com/6kCraze/cloudforge/internal/jobs"
+	cloudrabbit "github.com/6kCraze/cloudforge/internal/rabbitmq"
 	"github.com/6kCraze/cloudforge/internal/worker"
 )
 
@@ -26,6 +27,9 @@ func run(logger *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load configuration: %w", err)
+	}
+	if cfg.RabbitMQURL == "" {
+		return fmt.Errorf("RABBITMQ_URL is required")
 	}
 
 	workerID := cfg.WorkerID
@@ -47,6 +51,10 @@ func run(logger *slog.Logger) error {
 	defer pool.Close()
 
 	store := jobs.NewStore(pool)
-	runner := worker.New(store, workerID, cfg.WorkerPollInterval, jobs.Execute, logger)
+	handler := worker.NewHandler(store, workerID, jobs.Execute, logger)
+	connect := func(ctx context.Context) (worker.DeliveryConsumer, error) {
+		return cloudrabbit.OpenConsumer(ctx, cfg.RabbitMQURL, workerID)
+	}
+	runner := worker.NewRabbitWorker(handler, connect, workerID, cfg.WorkerBackoffMin, cfg.WorkerBackoffMax, logger)
 	return runner.Run(ctx)
 }

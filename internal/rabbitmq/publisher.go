@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -44,14 +43,7 @@ type Publisher struct {
 }
 
 func Open(ctx context.Context, url string, confirmTimeout time.Duration) (*Publisher, error) {
-	dialer := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 30 * time.Second}
-	connection, err := amqp.DialConfig(url, amqp.Config{
-		Heartbeat:  10 * time.Second,
-		Properties: amqp.Table{"connection_name": "cloudforge-dispatcher"},
-		Dial: func(network, address string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, address)
-		},
-	})
+	connection, err := openConnection(ctx, url, "cloudforge-dispatcher")
 	if err != nil {
 		return nil, fmt.Errorf("connect to RabbitMQ: %w", err)
 	}
@@ -66,17 +58,9 @@ func Open(ctx context.Context, url string, confirmTimeout time.Duration) (*Publi
 		_ = connection.Close()
 	}
 
-	if err := channel.ExchangeDeclare(ExchangeName, "direct", true, false, false, false, nil); err != nil {
+	if err := declareTopology(channel); err != nil {
 		cleanup()
-		return nil, fmt.Errorf("declare RabbitMQ exchange: %w", err)
-	}
-	if _, err := channel.QueueDeclare(QueueName, true, false, false, false, nil); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("declare RabbitMQ queue: %w", err)
-	}
-	if err := channel.QueueBind(QueueName, RoutingKey, ExchangeName, false, nil); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("bind RabbitMQ queue: %w", err)
+		return nil, err
 	}
 	if err := channel.Confirm(false); err != nil {
 		cleanup()
