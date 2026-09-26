@@ -94,7 +94,7 @@ published_at remains NULL
 dispatcher restarts and republishes event
 ```
 
-Both messages have the same outbox UUID in `message_id`. This is expected at-least-once publication. V2.4 must treat notifications as hints, consult PostgreSQL, and safely handle duplicate deliveries. No distributed transaction is attempted.
+Both messages have the same outbox UUID in `message_id`. This is expected at-least-once publication. The V2.4 worker treats notifications as hints, consults PostgreSQL, and safely handles duplicate deliveries. No distributed transaction is attempted.
 
 ## Reconnection and shutdown
 
@@ -204,4 +204,4 @@ ORDER BY j.created_at, j.id;
 - Up to 32 events are fetched per database query, but publication remains sequential. There is no concurrent publication or `LISTEN/NOTIFY` wakeup.
 - Malformed events remain unpublished and are reconsidered in later polls. If 32 or more malformed events occupy an entire oldest batch, newer valid events can still be blocked until an operator corrects at least one row. A later version can add explicit outbox failure handling without hiding the evidence now.
 - Published rows are retained without an archival policy.
-- No CloudForge RabbitMQ consumer exists. Manual ACK/NACK, prefetch, and duplicate-safe job claiming begin in V2.4.
+- This document describes the historical V2.3 checkpoint. Manual ACK/NACK, prefetch, and duplicate-safe job claiming were added in V2.4.

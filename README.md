@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.4 RabbitMQ worker consumption.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A dispatcher publishes that intent to RabbitMQ with at-least-once semantics, and a manual-ACK worker consumes it. PostgreSQL remains authoritative for every job lifecycle transition.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.5 failure-tested V2 architecture.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A dispatcher publishes that intent to RabbitMQ with at-least-once semantics, and a manual-ACK worker consumes it. PostgreSQL remains authoritative for every job lifecycle transition.
 
-The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK, prefetch, redelivery, duplicate handling, and the intentional running-state limitation.
+The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK and redelivery. The [V2 final architecture](docs/v2-final-architecture.md), [failure matrix](docs/v2-failure-matrix.md), and [V2.5 validation report](docs/v2-5-validation-report.md) state the tested guarantees and limits.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ The `.env` file contains local development credentials and is ignored by Git. Do
 
 RabbitMQ's local management UI is available at [http://localhost:15672](http://localhost:15672). With an unchanged `.env.example`, sign in with username `cloudforge` and password `cloudforge_dev_only`. These credentials are only for local development. The dispatcher and worker idempotently declare the topology. Use **Queues and Streams** → `cloudforge.jobs.v1` to inspect Ready, Unacked, and Consumers.
 
-## Run V2.4 locally
+## Run V2 locally
 
 Open three PowerShell terminals in the repository root and load the environment in each.
 
@@ -162,3 +162,11 @@ RabbitMQ confirmation and the database update cannot be atomic. A crash between 
 The worker consumes one unacknowledged delivery at a time (`prefetch=1`). It validates the message, loads the authoritative job, and atomically changes only a queued job to running. It ACKs only after a terminal result is durable or after PostgreSQL proves execution is unnecessary or intentionally deferred. Malformed and unknown messages are logged and ACKed to prevent poison loops; temporary database handling errors are NACKed with requeue.
 
 Broker or channel loss starts a small capped reconnect loop that restores topology, QoS, and consumption. Duplicate messages for succeeded or failed jobs do not run the workload again. A redelivery for a running job is ACKed without execution and leaves the job stuck until a later lease/recovery phase.
+
+## V2.5 failure validation
+
+V2.5 verifies broker, dispatcher, worker, database, startup-order, duplicate, and full-restart scenarios. A `202` job remains recoverable while RabbitMQ or the dispatcher is unavailable because PostgreSQL holds its outbox intent. Persistent Ready messages survived the tested clean broker restart. Success-before-ACK redelivery did not re-execute completed work.
+
+The validation also found and fixed a bounded-backoff bug: a healthy RabbitMQ reconnect no longer resets worker or dispatcher delay while PostgreSQL remains unavailable. Both processes now increase retry delay up to their configured cap until the complete broker/database path succeeds.
+
+The intentional limitation remains: a forced crash after `queued -> running` can leave a job stuck in `running`. V2 has no lease, heartbeat, recovery reaper, retry queue, or DLQ.

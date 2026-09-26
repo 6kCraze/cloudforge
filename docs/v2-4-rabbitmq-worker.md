@@ -67,7 +67,7 @@ One narrower failure window also remains: if execution finishes but PostgreSQL c
 
 ## Reconnection and shutdown
 
-Connection or channel failure closes the current consumer. The worker reconnects with capped exponential backoff from `WORKER_BACKOFF_MIN` to `WORKER_BACKOFF_MAX`. Every connection opens a new channel, redeclares matching topology, restores prefetch one, and starts a new manual-ACK consumer.
+Connection, channel, or temporary delivery-processing failure closes the current consumer. The worker reconnects with capped exponential backoff from `WORKER_BACKOFF_MIN` to `WORKER_BACKOFF_MAX`. Every connection opens a new channel, redeclares matching topology, restores prefetch one, and starts a new manual-ACK consumer. The delay resets only after a delivery completes successfully through the broker/database path; a healthy RabbitMQ connection cannot create a tight retry loop while PostgreSQL remains down.
 
 On Ctrl+C, the worker cancels the RabbitMQ consumer so the broker stops sending new deliveries. If one delivery is already being handled, it gets an uncancelled completion context: the worker finishes its reasonable in-progress work, persists the terminal state, ACKs, and then closes the channel, connection, and database pool. A forced process kill is different and produces RabbitMQ redelivery.
 

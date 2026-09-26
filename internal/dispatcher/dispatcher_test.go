@@ -19,6 +19,7 @@ type fakeStore struct {
 	events    []outbox.Event
 	marked    []string
 	markErr   error
+	listErr   error
 	listCalls int
 }
 
@@ -26,6 +27,9 @@ func (s *fakeStore) ListUnpublished(_ context.Context, limit int) ([]outbox.Even
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.listCalls++
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	if limit > len(s.events) {
 		limit = len(s.events)
 	}
@@ -215,6 +219,48 @@ func TestRunReconnectsAndStopsGracefully(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("dispatcher did not stop after cancellation")
+	}
+}
+
+func TestDatabaseFailuresIncreaseBackoffAcrossSuccessfulBrokerReconnects(t *testing.T) {
+	store := &fakeStore{listErr: errors.New("database unavailable")}
+	var mu sync.Mutex
+	var connectedAt []time.Time
+	fourthConnection := make(chan struct{})
+	connect := func(context.Context) (Publisher, error) {
+		mu.Lock()
+		connectedAt = append(connectedAt, time.Now())
+		attempt := len(connectedAt)
+		mu.Unlock()
+		if attempt == 4 {
+			close(fourthConnection)
+		}
+		return newFakePublisher(), nil
+	}
+	d := New(store, connect, time.Millisecond, 20*time.Millisecond, 80*time.Millisecond, discardLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+
+	select {
+	case <-fourthConnection:
+	case <-time.After(time.Second):
+		t.Fatal("dispatcher did not make four attempts")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(connectedAt) != 4 {
+		t.Fatalf("connections=%d, want 4", len(connectedAt))
+	}
+	firstGap := connectedAt[1].Sub(connectedAt[0])
+	secondGap := connectedAt[2].Sub(connectedAt[1])
+	thirdGap := connectedAt[3].Sub(connectedAt[2])
+	if firstGap < 15*time.Millisecond || secondGap < 35*time.Millisecond || thirdGap < 70*time.Millisecond {
+		t.Fatalf("reconnect gaps=%s/%s/%s, want increasing backoff near 20ms/40ms/80ms", firstGap, secondGap, thirdGap)
 	}
 }
 

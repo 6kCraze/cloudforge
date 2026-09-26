@@ -143,20 +143,26 @@ func (w *RabbitWorker) Run(ctx context.Context) error {
 			w.logger.Info("broker connected", "worker_id", w.workerID)
 		}
 		hasConnected = true
-		backoff = w.backoffMin
 
 		cancelFinished := make(chan struct{})
 		stopCancel := context.AfterFunc(ctx, func() {
 			_ = consumer.Cancel()
 			close(cancelFinished)
 		})
-		err = w.consume(ctx, consumer)
+		var handled bool
+		handled, err = w.consume(ctx, consumer)
 		if !stopCancel() {
 			<-cancelFinished
 		}
 		_ = consumer.Close()
 		if ctx.Err() != nil {
 			return nil
+		}
+		if handled {
+			// A successfully handled delivery proves the full broker/database path
+			// is healthy. Merely reconnecting to RabbitMQ does not: PostgreSQL may
+			// still be unavailable and the same requeued message may immediately fail.
+			backoff = w.backoffMin
 		}
 		if err != nil {
 			w.logger.Warn("consumer interrupted", "worker_id", w.workerID, "error", err, "retry_in", backoff)
@@ -169,25 +175,27 @@ func (w *RabbitWorker) Run(ctx context.Context) error {
 	return nil
 }
 
-func (w *RabbitWorker) consume(ctx context.Context, consumer DeliveryConsumer) error {
+func (w *RabbitWorker) consume(ctx context.Context, consumer DeliveryConsumer) (bool, error) {
+	handled := false
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return handled, nil
 		case err, ok := <-consumer.Done():
 			if ok && err != nil {
-				return err
+				return handled, err
 			}
-			return errors.New("RabbitMQ consumer closed")
+			return handled, errors.New("RabbitMQ consumer closed")
 		case delivery, ok := <-consumer.Deliveries():
 			if !ok {
-				return errors.New("RabbitMQ deliveries closed")
+				return handled, errors.New("RabbitMQ deliveries closed")
 			}
 			// Once accepted locally, graceful cancellation must not interrupt the
 			// database terminal update or the following acknowledgement.
 			if err := w.handleDelivery(context.WithoutCancel(ctx), delivery); err != nil {
-				return err
+				return handled, err
 			}
+			handled = true
 		}
 	}
 }

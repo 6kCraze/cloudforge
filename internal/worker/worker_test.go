@@ -326,3 +326,54 @@ func TestWorkerReconnectsAfterConsumerFailure(t *testing.T) {
 		t.Fatalf("connection attempts=%d, want 2", attempts)
 	}
 }
+
+func TestProcessingFailuresIncreaseBackoffAcrossSuccessfulBrokerReconnects(t *testing.T) {
+	store := fakeStore{get: func(context.Context, string) (jobs.Job, error) {
+		return jobs.Job{}, errors.New("database unavailable")
+	}}
+	handler := NewHandler(store, "worker-a", nil, discardLogger())
+	var mu sync.Mutex
+	var connectedAt []time.Time
+	fourthConnection := make(chan struct{})
+	connect := func(context.Context) (DeliveryConsumer, error) {
+		mu.Lock()
+		connectedAt = append(connectedAt, time.Now())
+		attempt := len(connectedAt)
+		mu.Unlock()
+		consumer := &fakeConsumer{
+			deliveries: make(chan amqp.Delivery, 1),
+			done:       make(chan error),
+			cancelled:  make(chan struct{}),
+		}
+		consumer.deliveries <- validDelivery(&fakeAcknowledger{}, uuid.NewString())
+		if attempt == 4 {
+			close(fourthConnection)
+		}
+		return consumer, nil
+	}
+	runner := NewRabbitWorker(handler, connect, "worker-a", 20*time.Millisecond, 80*time.Millisecond, discardLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- runner.Run(ctx) }()
+
+	select {
+	case <-fourthConnection:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not make four attempts")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(connectedAt) != 4 {
+		t.Fatalf("connections=%d, want 4", len(connectedAt))
+	}
+	firstGap := connectedAt[1].Sub(connectedAt[0])
+	secondGap := connectedAt[2].Sub(connectedAt[1])
+	thirdGap := connectedAt[3].Sub(connectedAt[2])
+	if firstGap < 15*time.Millisecond || secondGap < 35*time.Millisecond || thirdGap < 70*time.Millisecond {
+		t.Fatalf("reconnect gaps=%s/%s/%s, want increasing backoff near 20ms/40ms/80ms", firstGap, secondGap, thirdGap)
+	}
+}

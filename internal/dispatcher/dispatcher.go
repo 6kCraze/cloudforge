@@ -94,7 +94,6 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 				d.logger.Info("broker connected")
 			}
 			hasConnected = true
-			backoff = d.backoffMin
 		}
 
 		published, err := d.DispatchBatch(ctx, publisher)
@@ -113,8 +112,11 @@ func (d *Dispatcher) Run(ctx context.Context) error {
 			backoff = nextBackoff(backoff, d.backoffMax)
 			continue
 		}
+		// A successful outbox read proves both the database and broker path are
+		// healthy. A broker connection alone must not reset backoff while
+		// PostgreSQL remains unavailable.
+		backoff = d.backoffMin
 		if published > 0 {
-			backoff = d.backoffMin
 			continue
 		}
 
