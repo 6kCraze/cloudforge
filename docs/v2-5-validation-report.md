@@ -98,14 +98,15 @@ docker compose up -d --wait db rabbitmq
 go run ./cmd/migrate up
 go test ./...
 go vet ./...
-go test -tags=integration ./... -count=1 -timeout=180s
+. .\scripts\load-test-env.ps1
+go test -p 1 -tags=integration ./... -count=1 -timeout=180s
 docker run --rm -v "${PWD}:/src" -w /src golang:1.27 go test -race ./...
 git diff --check
 docker compose ps
 docker exec cloudforge-rabbitmq-1 rabbitmqctl list_queues name durable messages_ready messages_unacknowledged consumers
 ```
 
-The integration suite owns and purges its test data/queue. Do not run a development worker or dispatcher against the same queue while the suite runs.
+Current integration fixtures require the separate test database, vhost, and restricted accounts described in [integration-test setup](integration-testing.md). They never fall back to development configuration. Cleanup truncates/purges only the test namespace; do not run application processes in that namespace during tests. The table above records historical V2 results.
 
 ## Short portfolio demonstration
 

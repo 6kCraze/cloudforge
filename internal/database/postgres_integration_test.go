@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/6kCraze/cloudforge/internal/config"
+	"github.com/6kCraze/cloudforge/internal/testenv"
 )
 
 func TestPostgresConnectionAndMigration(t *testing.T) {
-	cfg, err := config.Load()
+	cfg, err := testenv.Load()
 	if err != nil {
 		t.Fatalf("load configuration: %v", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/6kCraze/cloudforge/internal/jobs"
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	cloudrabbit "github.com/6kCraze/cloudforge/internal/rabbitmq"
+	"github.com/6kCraze/cloudforge/internal/testenv"
 	"github.com/jackc/pgx/v5/pgxpool"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -34,12 +35,9 @@ type integrationFixture struct {
 
 func newIntegrationFixture(t *testing.T) *integrationFixture {
 	t.Helper()
-	cfg, err := config.Load()
+	cfg, err := testenv.Load()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.RabbitMQURL == "" {
-		t.Fatal("RABBITMQ_URL is required for dispatcher integration tests")
 	}
 	// Integration packages share one database and RabbitMQ queue. A longer
 	// setup deadline lets the advisory lock serialize packages under `go test ./...`.

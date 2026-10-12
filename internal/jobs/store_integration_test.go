@@ -5,12 +5,12 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"sync"
 	"testing"
 
 	"github.com/6kCraze/cloudforge/internal/database"
 	"github.com/6kCraze/cloudforge/internal/outbox"
+	"github.com/6kCraze/cloudforge/internal/testenv"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,11 +18,11 @@ const integrationAdvisoryLockID int64 = 240022
 
 func integrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL is not set")
+	cfg, err := testenv.Load()
+	if err != nil {
+		t.Fatal(err)
 	}
-	pool, err := database.Open(context.Background(), databaseURL)
+	pool, err := database.Open(context.Background(), cfg.DatabaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}

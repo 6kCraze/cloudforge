@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V2.5 failure-tested V2 architecture.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A dispatcher publishes that intent to RabbitMQ with at-least-once semantics, and a manual-ACK worker consumes it. PostgreSQL remains authoritative for every job lifecycle transition.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V3 controlled multiple-worker scaling.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A dispatcher publishes that intent to RabbitMQ with at-least-once semantics, and independent manual-ACK workers compete for deliveries from one shared queue. PostgreSQL remains authoritative for every job lifecycle transition.
 
-The [roadmap](docs/roadmap.md) records the planned V0-V13 progression. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK and redelivery. The [V2 final architecture](docs/v2-final-architecture.md), [failure matrix](docs/v2-failure-matrix.md), and [V2.5 validation report](docs/v2-5-validation-report.md) state the tested guarantees and limits.
+The [roadmap](docs/roadmap.md) records the planned V0-V6 progression and optional backlog. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK and redelivery. The [V2 final architecture](docs/v2-final-architecture.md), [failure matrix](docs/v2-failure-matrix.md), and [V2.5 validation report](docs/v2-5-validation-report.md) state the tested V2 guarantees. [V3 multiple-worker scaling](docs/v3-multiple-workers.md) explains competing consumers, deterministic concurrency validation, and the lightweight local demo.
 
 ## Prerequisites
 
@@ -21,7 +21,6 @@ docker compose up -d --wait db rabbitmq
 . .\scripts\load-env.ps1
 go run ./cmd/migrate up
 go test ./...
-go test -tags=integration ./...
 ```
 
 The `.env` file contains local development credentials and is ignored by Git. Docker Compose reads it for PostgreSQL, while Go reads process environment variables. Dot-source `scripts/load-env.ps1` in each new PowerShell session before starting a Go command.
@@ -105,14 +104,15 @@ go run ./cmd/migrate down
 go run ./cmd/migrate status
 go test ./...
 go test -race ./...
-go test -tags=integration ./...
+. .\scripts\load-test-env.ps1
+go test -p 1 -tags=integration ./... -timeout=120s
 docker compose down
 ```
 
-The integration suite requires PostgreSQL with all migrations applied. The race detector on Windows requires CGO and a supported C compiler. If one is not installed, run it in the official Go container:
+Integration fixtures require explicit isolated test URLs, a dedicated `cloudforge_test` database and RabbitMQ vhost, and restricted test accounts. They refuse development URLs before connecting. Follow [integration-test setup](docs/integration-testing.md) before running integration commands; never use the development database or normal broker queue for fixtures. The race detector on Windows requires CGO and a supported C compiler. If one is not installed, run it in the official Go container:
 
 ```powershell
-docker run --rm -v "${PWD}:/src" -w /src golang:1.27 go test -race ./...
+docker run --rm --pull=never --cpus=1 --memory=2g -v "${PWD}:/src" -w /src golang:1.27 go test -p 1 -race ./...
 ```
 
 Do not use `docker compose down -v` for a normal shutdown because `-v` deletes the database volume.
@@ -170,3 +170,23 @@ V2.5 verifies broker, dispatcher, worker, database, startup-order, duplicate, an
 The validation also found and fixed a bounded-backoff bug: a healthy RabbitMQ reconnect no longer resets worker or dispatcher delay while PostgreSQL remains unavailable. Both processes now increase retry delay up to their configured cap until the complete broker/database path succeeds.
 
 The intentional limitation remains: a forced crash after `queued -> running` can leave a job stuck in `running`. V2 has no lease, heartbeat, recovery reaper, retry queue, or DLQ.
+
+## V3 multiple workers
+
+V3 runs PostgreSQL and RabbitMQ in Docker while the API, dispatcher, and workers remain local Go processes. Start two workers with distinct identities in separate terminals:
+
+```powershell
+. .\scripts\load-env.ps1
+$env:WORKER_ID = "worker-01"
+go run ./cmd/worker
+```
+
+```powershell
+. .\scripts\load-env.ps1
+$env:WORKER_ID = "worker-02"
+go run ./cmd/worker
+```
+
+Both consume `cloudforge.jobs.v1`. RabbitMQ distributes deliveries among available consumers; it does not broadcast every job to both. Prefetch remains one per worker. PostgreSQL's conditional `queued -> running` claim remains the execution guard if duplicate notifications reach different workers.
+
+The V3 integration test uses two blocking processors to prove overlapping execution without CPU-heavy synthetic work. It also proves that two duplicate deliveries result in one execution and that stopping one worker leaves the other operational. Application containerization remains deferred until it materially helps reproducibility, deployment, or scaling.

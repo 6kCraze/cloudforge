@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/6kCraze/cloudforge/internal/config"
 	"github.com/6kCraze/cloudforge/internal/database"
 	"github.com/6kCraze/cloudforge/internal/dispatcher"
 	"github.com/6kCraze/cloudforge/internal/jobs"
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	cloudrabbit "github.com/6kCraze/cloudforge/internal/rabbitmq"
+	"github.com/6kCraze/cloudforge/internal/testenv"
 	"github.com/6kCraze/cloudforge/internal/worker"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -26,12 +26,9 @@ const integrationLockID int64 = 240022
 // without a dispatcher, RabbitMQ retains ready work without a worker, and the
 // real consumer finishes the job exactly once when it starts.
 func TestV2EndToEndAcrossDispatcherAndWorkerDowntime(t *testing.T) {
-	cfg, err := config.Load()
+	cfg, err := testenv.Load()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if cfg.RabbitMQURL == "" {
-		t.Fatal("RABBITMQ_URL is required for V2 system integration tests")
 	}
 
 	ctx, cancelSetup := context.WithTimeout(context.Background(), 60*time.Second)
