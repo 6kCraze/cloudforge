@@ -14,6 +14,7 @@ import (
 	"github.com/6kCraze/cloudforge/internal/config"
 	"github.com/6kCraze/cloudforge/internal/database"
 	"github.com/6kCraze/cloudforge/internal/httpapi"
+	"github.com/6kCraze/cloudforge/internal/images"
 	"github.com/6kCraze/cloudforge/internal/jobs"
 )
 
@@ -41,7 +42,12 @@ func run(logger *slog.Logger) error {
 	defer pool.Close()
 
 	store := jobs.NewStore(pool)
-	api := httpapi.New(jobs.NewService(store), pool, logger)
+	storage, err := images.Open(cfg.StorageRoot)
+	if err != nil {
+		return fmt.Errorf("open storage: %w", err)
+	}
+	defer storage.Close()
+	api := httpapi.NewWithImages(jobs.NewService(store), pool, logger, storage)
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", cfg.HTTPPort),
 		Handler:           api.Handler(),

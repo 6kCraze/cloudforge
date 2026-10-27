@@ -8,6 +8,7 @@ import (
 
 const (
 	TypeSyntheticSHA256 = "synthetic.sha256"
+	TypeImageThumbnail  = "image.thumbnail"
 
 	StatusQueued    = "queued"
 	StatusRunning   = "running"
@@ -20,10 +21,23 @@ const (
 )
 
 var (
-	ErrNotFound     = errors.New("job not found")
-	ErrNoJobs       = errors.New("no queued jobs")
-	ErrNotClaimable = errors.New("job is not queued")
+	ErrNotFound        = errors.New("job not found")
+	ErrNoJobs          = errors.New("no queued jobs")
+	ErrNotClaimable    = errors.New("job is not queued")
+	ErrCommitUncertain = errors.New("job commit outcome is uncertain")
 )
+
+type ThumbnailPayload struct {
+	InputID string `json:"input_id"`
+}
+
+type ThumbnailResult struct {
+	OutputID string `json:"output_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Format   string `json:"format"`
+	Bytes    int64  `json:"bytes"`
+}
 
 type SHA256Payload struct {
 	Text       string `json:"text"`

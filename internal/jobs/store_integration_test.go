@@ -39,7 +39,7 @@ func integrationPool(t *testing.T) *pgxpool.Pool {
 		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationAdvisoryLockID)
 		lockConn.Release()
 	})
-	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatalf("truncate job data: %v", err)
 	}
 	return pool

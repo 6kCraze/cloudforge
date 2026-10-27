@@ -1,6 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V3 controlled multiple-worker scaling.** Job creation atomically records both the queued job and its publication intent in PostgreSQL. A dispatcher publishes that intent to RabbitMQ with at-least-once semantics, and independent manual-ACK workers compete for deliveries from one shared queue. PostgreSQL remains authoritative for every job lifecycle transition.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V4 image batches and browser application.** Select one to four JPEG/PNG images, submit a durable batch, watch actual job states, preview thumbnails, and download PNG results. Each image uses the existing job/outbox → RabbitMQ → Go worker flow. Synthetic SHA-256 jobs remain supported. PostgreSQL remains authoritative for every job lifecycle transition.
+
+The [V4 image workflow](docs/v4-image-workflow.md) documents the browser, batch and single-image routes, limits, storage, and validation. V3 is released at annotated tag `v0.3.0`.
 
 The [roadmap](docs/roadmap.md) records the planned V0-V6 progression and optional backlog. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK and redelivery. The [V2 final architecture](docs/v2-final-architecture.md), [failure matrix](docs/v2-failure-matrix.md), and [V2.5 validation report](docs/v2-5-validation-report.md) state the tested V2 guarantees. [V3 multiple-worker scaling](docs/v3-multiple-workers.md) explains competing consumers, deterministic concurrency validation, and the lightweight local demo.
 
@@ -27,7 +29,7 @@ The `.env` file contains local development credentials and is ignored by Git. Do
 
 RabbitMQ's local management UI is available at [http://localhost:15672](http://localhost:15672). With an unchanged `.env.example`, sign in with username `cloudforge` and password `cloudforge_dev_only`. These credentials are only for local development. The dispatcher and worker idempotently declare the topology. Use **Queues and Streams** → `cloudforge.jobs.v1` to inspect Ready, Unacked, and Consumers.
 
-## Run V2 locally
+## Run locally
 
 Open three PowerShell terminals in the repository root and load the environment in each.
 
@@ -52,7 +54,13 @@ Terminal 3:
 go run ./cmd/worker
 ```
 
-Submit and inspect a job from a fourth terminal:
+Open [CloudForge](http://localhost:8080/) after starting the three processes. Choose or drop **one to four JPEG/PNG images**, click **Process images**, then preview and download completed PNG thumbnails. Saved batch links restore status after a reload. Progress counts actual PostgreSQL job states; polling runs about every two seconds and stops at completion. Use one worker normally.
+
+Limits: **5 MiB per image, 21 MiB per batch request, 8 megapixels per image, and 8,192 pixels per side**. Configure the same absolute `STORAGE_ROOT` for API and worker, or leave it blank for the shared per-user cache directory. No Node.js or frontend build is required; Go embeds the HTML/CSS/JavaScript.
+
+Existing development databases need migrations **00004** (image jobs) and **00005** (batch/file metadata). They preserve existing jobs. The local development database for this checkout reached version 5 after an approved upgrade on October 26, 2026; other databases must be checked and backed up before upgrading. Initial browser validation used the isolated test database/vhost, followed by a live development-browser demonstration.
+
+The synthetic SHA-256 API remains available. Submit and inspect a job from a fourth terminal:
 
 ```powershell
 $body = @{

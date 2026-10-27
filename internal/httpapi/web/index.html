@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123a35">
+  <title>CloudForge · Image workspace</title>
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <aside class="rail">
+    <a class="brand" href="/" aria-label="CloudForge home"><span class="brand-mark">C<span>F</span></span>CloudForge</a>
+    <div class="rail-body"><p class="eyebrow">WORKSPACE</p><div class="nav-current"><span>▧</span> Image processing</div><p class="rail-note">A small batch.<br>A durable workflow.</p></div>
+    <div class="rail-bottom"><span class="dot"></span> Local workspace <span class="version">V4</span></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>Workspace <span class="breadcrumb">/</span> Images</span><span class="operation">PNG thumbnails · 320 × 320</span></header>
+    <section class="intro"><p class="eyebrow">IMAGE WORKSPACE</p><h1>Give your images<br>a smaller footprint.</h1><p>Turn up to four JPEG or PNG images into clean, proportional thumbnails. Keep the detail. Keep the transparency.</p></section>
+    <section class="workspace" aria-label="Image processing workspace">
+      <div class="panel upload-panel">
+        <div class="panel-heading"><div><span class="step">01</span><h2>Your images</h2></div><span id="selection-count" class="pill">0 / 4 selected</span></div>
+        <div id="drop-zone" class="drop-zone">
+          <span class="upload-icon" aria-hidden="true">↥</span><h3>Drop your images here</h3><p>or choose files from your computer</p>
+          <button id="choose" class="secondary" type="button">Choose images <span aria-hidden="true">↗</span></button>
+          <input id="files" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden aria-label="Select JPEG or PNG images">
+          <span class="limits">JPEG / PNG · 5 MiB each · Up to 4 files</span>
+        </div>
+        <ul id="selected-files" class="selected-files" aria-label="Selected images"></ul>
+        <p id="selection-error" class="error" role="alert" hidden></p>
+        <button id="process" class="primary" type="button" disabled>Process images <span aria-hidden="true">→</span></button>
+        <p class="upload-note">Maximum 8 megapixels and 8,192 px per side.<br>Original files stay untouched. Smaller images are never enlarged.</p>
+      </div>
+      <div class="panel results-panel">
+        <div class="panel-heading"><div><span class="step">02</span><h2>Your results</h2></div><span id="batch-state" class="pill">Ready when you are</span></div>
+        <div id="empty-state" class="empty-state"><div class="empty-art" aria-hidden="true"><span>▧</span><span>▧</span></div><h3>Good things come in small sizes.</h3><p>Your batch and finished thumbnails will appear here.<br>Select a few images to get started.</p></div>
+        <div id="batch-view" hidden>
+          <div class="batch-meta"><span id="batch-id"></span><a id="batch-link" href="#">Batch link ↗</a></div>
+          <div class="progress-label"><strong id="progress-text"></strong><button id="poll-control" class="text-button" type="button">Pause updates</button></div>
+          <progress id="progress" max="1" value="0" aria-label="Finished jobs"></progress>
+          <div class="counts" id="counts"></div>
+          <p id="batch-message" class="batch-message" role="status" aria-live="polite"></p>
+          <div id="results" class="results" aria-label="Image results"></div>
+        </div>
+        <p id="api-error" class="error" role="alert" hidden></p>
+      </div>
+    </section>
+    <footer><span>Made for the work between upload and download.</span><span>Asynchronous processing · Real job states</span></footer>
+  </main>
+</body>
+</html>

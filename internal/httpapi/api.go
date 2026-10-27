@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/6kCraze/cloudforge/internal/images"
 	"github.com/6kCraze/cloudforge/internal/jobs"
 	"github.com/google/uuid"
 )
@@ -22,9 +23,12 @@ type ReadinessChecker interface {
 }
 
 type API struct {
-	jobs   JobService
-	db     ReadinessChecker
-	logger *slog.Logger
+	jobs      JobService
+	db        ReadinessChecker
+	logger    *slog.Logger
+	images    *images.Store
+	imageJobs ThumbnailCreator
+	batches   jobs.BatchStore
 }
 
 func New(jobService JobService, db ReadinessChecker, logger *slog.Logger) *API {
@@ -37,6 +41,16 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /readyz", a.ready)
 	mux.HandleFunc("POST /v1/jobs", a.createJob)
 	mux.HandleFunc("GET /v1/jobs/{id}", a.getJob)
+	if a.images != nil {
+		mux.HandleFunc("GET /{$}", a.browserApp)
+		mux.Handle("GET /assets/", browserAssets())
+		mux.HandleFunc("POST /v1/images", a.uploadImage)
+		mux.HandleFunc("GET /v1/jobs/{id}/thumbnail", a.downloadThumbnail)
+		if a.batches != nil {
+			mux.HandleFunc("POST /v1/batches", a.createBatch)
+			mux.HandleFunc("GET /v1/batches/{id}", a.getBatch)
+		}
+	}
 	return mux
 }
 

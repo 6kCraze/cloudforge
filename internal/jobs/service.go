@@ -4,6 +4,7 @@ import "context"
 
 type JobStore interface {
 	Create(context.Context, CreateInput) (Job, error)
+	CreateThumbnail(context.Context, ThumbnailPayload) (Job, error)
 	Get(context.Context, string) (Job, error)
 }
 
@@ -24,4 +25,8 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (Job, error) {
 
 func (s *Service) Get(ctx context.Context, id string) (Job, error) {
 	return s.store.Get(ctx, id)
+}
+
+func (s *Service) CreateThumbnail(ctx context.Context, input ThumbnailPayload) (Job, error) {
+	return s.store.CreateThumbnail(ctx, input)
 }

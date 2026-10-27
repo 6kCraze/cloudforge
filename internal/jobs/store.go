@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,10 +23,43 @@ func NewStore(pool *pgxpool.Pool) *Store {
 }
 
 func (s *Store) Create(ctx context.Context, input CreateInput) (Job, error) {
-	jobID := uuid.NewString()
-	eventID := uuid.NewString()
+	return s.create(ctx, input.Type, input.Payload)
+}
 
-	jobPayload, err := json.Marshal(input.Payload)
+func (s *Store) CreateThumbnail(ctx context.Context, input ThumbnailPayload) (Job, error) {
+	id, err := uuid.Parse(input.InputID)
+	if err != nil || id.String() != input.InputID {
+		return Job{}, &ValidationError{Field: "input_id", Message: "must be a canonical UUID"}
+	}
+	return s.create(ctx, TypeImageThumbnail, input)
+}
+
+func (s *Store) create(ctx context.Context, jobType string, payload any) (Job, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return Job{}, fmt.Errorf("begin job creation transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	job, err := insertJob(ctx, tx, jobType, payload)
+	if err != nil {
+		return Job{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		if commitOutcomeUncertain(err) {
+			// A lost connection may hide a successful commit. The upload handler
+			// must retain its input instead of deleting a possibly referenced file.
+			return job, fmt.Errorf("%w: %w", ErrCommitUncertain, err)
+		}
+		return Job{}, fmt.Errorf("commit job creation transaction: %w", err)
+	}
+	return job, nil
+}
+
+// insertJob registers a job and its publication intent in the caller's transaction.
+func insertJob(ctx context.Context, tx pgx.Tx, jobType string, payload any) (Job, error) {
+	jobID := uuid.NewString()
+	jobPayload, err := json.Marshal(payload)
 	if err != nil {
 		return Job{}, fmt.Errorf("encode job payload: %w", err)
 	}
@@ -32,33 +67,14 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (Job, error) {
 	if err != nil {
 		return Job{}, fmt.Errorf("encode outbox payload: %w", err)
 	}
-
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return Job{}, fmt.Errorf("begin job creation transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-
-	row := tx.QueryRow(ctx, `
-		INSERT INTO cloudforge.jobs (id, type, payload)
-		VALUES ($1, $2, $3)
-		RETURNING `+jobColumns,
-		jobID, input.Type, jobPayload,
-	)
-	job, err := scanJob(row)
+	job, err := scanJob(tx.QueryRow(ctx, `INSERT INTO cloudforge.jobs (id, type, payload)
+		VALUES ($1, $2, $3) RETURNING `+jobColumns, jobID, jobType, jobPayload))
 	if err != nil {
 		return Job{}, fmt.Errorf("insert job: %w", err)
 	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO cloudforge.outbox_events (id, event_type, aggregate_id, payload)
-		VALUES ($1, $2, $3, $4)
-	`, eventID, outbox.EventTypeJobReady, jobID, eventPayload); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO cloudforge.outbox_events (id, event_type, aggregate_id, payload)
+		VALUES ($1, $2, $3, $4)`, uuid.NewString(), outbox.EventTypeJobReady, jobID, eventPayload); err != nil {
 		return Job{}, fmt.Errorf("insert outbox event: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return Job{}, fmt.Errorf("commit job creation transaction: %w", err)
 	}
 	return job, nil
 }
@@ -213,4 +229,19 @@ func scanJob(row rowScanner) (Job, error) {
 		&job.CompletedAt,
 	)
 	return job, err
+}
+
+// Only explicit rollback replies justify deleting a finalized input. Transport
+// errors and SQLSTATE statement-completion-unknown are conservatively retained.
+func commitOutcomeUncertain(err error) bool {
+	if err == nil || errors.Is(err, pgx.ErrTxCommitRollback) {
+		return false
+	}
+	var serverError *pgconn.PgError
+	if errors.As(err, &serverError) {
+		if strings.HasPrefix(serverError.Code, "23") || (strings.HasPrefix(serverError.Code, "40") && serverError.Code != "40003") {
+			return false
+		}
+	}
+	return true
 }

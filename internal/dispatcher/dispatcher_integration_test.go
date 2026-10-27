@@ -60,7 +60,7 @@ func newIntegrationFixture(t *testing.T) *integrationFixture {
 		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, dispatcherIntegrationLockID)
 		lockConn.Release()
 	})
-	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func newIntegrationFixture(t *testing.T) *integrationFixture {
 	}
 	t.Cleanup(func() {
 		_, _ = admin.QueuePurge(cloudrabbit.QueueName, false)
-		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`)
+		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
 	})
 
 	return &integrationFixture{

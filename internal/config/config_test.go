@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -10,6 +11,29 @@ func TestLoadRequiresDatabaseURL(t *testing.T) {
 
 	if _, err := Load(); err == nil {
 		t.Fatal("expected a missing DATABASE_URL error")
+	}
+}
+
+func TestStorageRootMustBeAbsoluteAndShared(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	root := t.TempDir()
+	t.Setenv("STORAGE_ROOT", root)
+	api, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker, err := Load()
+	if err != nil || api.StorageRoot != worker.StorageRoot || api.StorageRoot != filepath.Clean(root) {
+		t.Fatalf("storage root mismatch: %v", err)
+	}
+	t.Setenv("STORAGE_ROOT", "relative/storage")
+	if _, err := Load(); err == nil {
+		t.Fatal("relative STORAGE_ROOT accepted")
+	}
+	t.Setenv("STORAGE_ROOT", "")
+	defaults, err := Load()
+	if err != nil || !filepath.IsAbs(defaults.StorageRoot) {
+		t.Fatalf("default root must be absolute: %v", err)
 	}
 }
 

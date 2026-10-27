@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 
 type Config struct {
 	DatabaseURL              string
+	StorageRoot              string
 	RabbitMQURL              string
 	AppEnv                   string
 	HTTPPort                 int
@@ -27,6 +29,17 @@ func Load() (Config, error) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
+	}
+	storageRoot := strings.TrimSpace(os.Getenv("STORAGE_ROOT"))
+	if storageRoot == "" {
+		cache, err := os.UserCacheDir()
+		if err != nil {
+			return Config{}, fmt.Errorf("default storage root: %w", err)
+		}
+		storageRoot = filepath.Join(cache, "CloudForge", "storage")
+	}
+	if !filepath.IsAbs(storageRoot) {
+		return Config{}, errors.New("STORAGE_ROOT must be an absolute path")
 	}
 
 	appEnv := strings.TrimSpace(os.Getenv("APP_ENV"))
@@ -71,6 +84,7 @@ func Load() (Config, error) {
 
 	return Config{
 		DatabaseURL:              databaseURL,
+		StorageRoot:              filepath.Clean(storageRoot),
 		RabbitMQURL:              strings.TrimSpace(os.Getenv("RABBITMQ_URL")),
 		AppEnv:                   appEnv,
 		HTTPPort:                 httpPort,

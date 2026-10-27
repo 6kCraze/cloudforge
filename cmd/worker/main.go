@@ -10,6 +10,7 @@ import (
 
 	"github.com/6kCraze/cloudforge/internal/config"
 	"github.com/6kCraze/cloudforge/internal/database"
+	"github.com/6kCraze/cloudforge/internal/images"
 	"github.com/6kCraze/cloudforge/internal/jobs"
 	cloudrabbit "github.com/6kCraze/cloudforge/internal/rabbitmq"
 	"github.com/6kCraze/cloudforge/internal/worker"
@@ -51,7 +52,12 @@ func run(logger *slog.Logger) error {
 	defer pool.Close()
 
 	store := jobs.NewStore(pool)
-	handler := worker.NewHandler(store, workerID, jobs.Execute, logger)
+	storage, err := images.Open(cfg.StorageRoot)
+	if err != nil {
+		return fmt.Errorf("open storage: %w", err)
+	}
+	defer storage.Close()
+	handler := worker.NewHandler(store, workerID, storage.Execute, logger)
 	connect := func(ctx context.Context) (worker.DeliveryConsumer, error) {
 		return cloudrabbit.OpenConsumer(ctx, cfg.RabbitMQURL, workerID)
 	}

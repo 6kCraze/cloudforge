@@ -50,7 +50,7 @@ func TestV2EndToEndAcrossDispatcherAndWorkerDowntime(t *testing.T) {
 		_, _ = lock.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationLockID)
 		lock.Release()
 	}()
-	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,7 +74,7 @@ func TestV2EndToEndAcrossDispatcherAndWorkerDowntime(t *testing.T) {
 	}
 	defer func() {
 		_, _ = admin.QueuePurge(cloudrabbit.QueueName, false)
-		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.outbox_events, cloudforge.jobs`)
+		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
 	}()
 
 	jobStore := jobs.NewStore(pool)
