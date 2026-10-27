@@ -39,7 +39,7 @@ func integrationPool(t *testing.T) *pgxpool.Pool {
 		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationAdvisoryLockID)
 		lockConn.Release()
 	})
-	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(context.Background(), `TRUNCATE cloudforge.job_attempts, cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatalf("truncate job data: %v", err)
 	}
 	return pool
@@ -244,11 +244,12 @@ func TestConcurrentClaimByIDOnlyOneWorkerWins(t *testing.T) {
 func TestSuccessfulResultPersists(t *testing.T) {
 	store := NewStore(integrationPool(t))
 	created := createTestJob(t, store)
-	if _, err := store.ClaimNext(context.Background(), "worker-a"); err != nil {
+	claimed, err := store.ClaimNext(context.Background(), "worker-a")
+	if err != nil {
 		t.Fatal(err)
 	}
 	result := json.RawMessage(`{"digest":"abc","iterations":10,"duration_ms":1}`)
-	if err := store.MarkSucceeded(context.Background(), created.ID, "worker-a", result); err != nil {
+	if err := store.MarkSucceeded(context.Background(), created.ID, "worker-a", *claimed.AttemptID, result); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,10 +269,11 @@ func TestSuccessfulResultPersists(t *testing.T) {
 func TestFailurePersists(t *testing.T) {
 	store := NewStore(integrationPool(t))
 	created := createTestJob(t, store)
-	if _, err := store.ClaimNext(context.Background(), "worker-a"); err != nil {
+	claimed, err := store.ClaimNext(context.Background(), "worker-a")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.MarkFailed(context.Background(), created.ID, "worker-a", "execution_failed", "synthetic failure"); err != nil {
+	if err := store.MarkFailed(context.Background(), created.ID, "worker-a", *claimed.AttemptID, "execution_failed", "synthetic failure"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -48,9 +48,9 @@ function displayBatch(batch) {
   const done = batch.succeeded + batch.failed;
   $('progress-text').textContent = `${done} of ${batch.job_count} finished`;
   $('progress').max = batch.job_count; $('progress').value = done;
-  $('counts').replaceChildren(...[['Queued', batch.queued], ['Running', batch.running], ['Succeeded', batch.succeeded], ['Failed', batch.failed]].map(([name, count]) => element('span', '', `${name} ${count}`)));
+	$('counts').replaceChildren(...[['Queued', batch.queued], ['Running', batch.running], ['Waiting to retry', batch.retry_wait || 0], ['Succeeded', batch.succeeded], ['Failed', batch.failed]].map(([name, count]) => element('span', '', `${name} ${count}`)));
   $('batch-state').textContent = terminal(batch) ? (batch.failed ? 'Finished with errors' : 'Batch complete') : 'Processing';
-  $('batch-message').textContent = terminal(batch) ? (batch.failed ? 'Finished images are ready. Review the failure details below.' : 'Your thumbnails are ready to preview and download.') : (batch.running ? 'Your worker is processing images. Updates reflect saved job states.' : 'Images are queued. Processing will begin when a worker is available.');
+  $('batch-message').textContent = terminal(batch) ? (batch.failed ? 'Finished images are ready. Review the failure details below.' : 'Your thumbnails are ready to preview and download.') : (batch.retry_wait ? 'A job is waiting for its next attempt. Updates reflect saved job states.' : batch.running ? 'Your worker is processing images. Updates reflect saved job states.' : 'Images are queued. Processing will begin when a worker is available.');
   $('poll-control').hidden = terminal(batch); $('poll-control').textContent = paused ? 'Resume updates' : 'Pause updates';
   // Preserve existing preview nodes when a polling response has no job changes.
   const signature = JSON.stringify(batch.jobs);
@@ -59,7 +59,7 @@ function displayBatch(batch) {
   batch.jobs.forEach((job) => {
     const card = element('article', 'result'); card.dataset.jobId = job.id;
     const visual = element('div', `thumbnail-area${job.status === 'succeeded' ? '' : ' job-placeholder'}`);
-    const detail = element('div', 'result-detail'); detail.append(element('span', 'result-name', job.original_name), element('span', `state ${job.status}`, job.status));
+    const detail = element('div', 'result-detail'); detail.append(element('span', 'result-name', job.original_name), element('span', `state ${job.status}`, job.status === 'retry_wait' ? 'Waiting to retry' : job.status));
     if (job.status === 'succeeded' && job.output_url) {
       const image = element('img'); image.src = job.output_url; image.alt = `Thumbnail of ${job.original_name}`;
       image.addEventListener('error', () => { visual.replaceChildren(element('span', '', 'Unavailable')); detail.append(element('p', 'failure', 'The thumbnail could not be loaded. Its output may be missing or incomplete.')); }, { once: true }); visual.append(image);

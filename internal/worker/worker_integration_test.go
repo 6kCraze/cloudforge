@@ -59,7 +59,7 @@ func newWorkerFixture(t *testing.T) *workerFixture {
 		_, _ = lockConn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, workerIntegrationLockID)
 		lockConn.Release()
 	})
-	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.job_attempts, cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatal(err)
 	}
 	publisher, err := cloudrabbit.Open(ctx, cfg.RabbitMQURL, cfg.DispatcherConfirmTimeout)
@@ -82,7 +82,7 @@ func newWorkerFixture(t *testing.T) *workerFixture {
 	}
 	t.Cleanup(func() {
 		_, _ = admin.QueuePurge(cloudrabbit.QueueName, false)
-		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
+		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.job_attempts, cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
 	})
 	return &workerFixture{cfg: cfg, pool: pool, store: jobs.NewStore(pool), outbox: outbox.NewStore(pool), publisher: publisher, admin: admin}
 }

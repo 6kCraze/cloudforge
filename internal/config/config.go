@@ -19,6 +19,11 @@ type Config struct {
 	WorkerID                 string
 	WorkerBackoffMin         time.Duration
 	WorkerBackoffMax         time.Duration
+	WorkerLeaseDuration      time.Duration
+	WorkerHeartbeatInterval  time.Duration
+	RetryBaseDelay           time.Duration
+	RetryMaxDelay            time.Duration
+	RecoveryPollInterval     time.Duration
 	DispatcherPollInterval   time.Duration
 	DispatcherConfirmTimeout time.Duration
 	DispatcherBackoffMin     time.Duration
@@ -64,6 +69,35 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	workerLeaseDuration, err := durationEnv("WORKER_LEASE_DURATION", 30*time.Second, 3*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	workerHeartbeatInterval, err := durationEnv("WORKER_HEARTBEAT_INTERVAL", 5*time.Second, 100*time.Millisecond)
+	if err != nil {
+		return Config{}, err
+	}
+	if workerLeaseDuration > 10*time.Minute || workerHeartbeatInterval >= workerLeaseDuration/3 {
+		return Config{}, errors.New("worker lease must be at most 10m and heartbeat interval must be less than one third of the lease")
+	}
+	retryBaseDelay, err := durationEnv("RETRY_BASE_DELAY", time.Second, 100*time.Millisecond)
+	if err != nil {
+		return Config{}, err
+	}
+	retryMaxDelay, err := durationEnv("RETRY_MAX_DELAY", 4*time.Second, retryBaseDelay)
+	if err != nil {
+		return Config{}, err
+	}
+	if retryMaxDelay > time.Minute {
+		return Config{}, errors.New("RETRY_MAX_DELAY must be at most 1m")
+	}
+	recoveryPollInterval, err := durationEnv("RECOVERY_POLL_INTERVAL", 500*time.Millisecond, 100*time.Millisecond)
+	if err != nil {
+		return Config{}, err
+	}
+	if recoveryPollInterval > 30*time.Second {
+		return Config{}, errors.New("RECOVERY_POLL_INTERVAL must be at most 30s")
+	}
 
 	dispatcherPollInterval, err := durationEnv("DISPATCHER_POLL_INTERVAL", 500*time.Millisecond, 10*time.Millisecond)
 	if err != nil {
@@ -91,6 +125,11 @@ func Load() (Config, error) {
 		WorkerID:                 strings.TrimSpace(os.Getenv("WORKER_ID")),
 		WorkerBackoffMin:         workerBackoffMin,
 		WorkerBackoffMax:         workerBackoffMax,
+		WorkerLeaseDuration:      workerLeaseDuration,
+		WorkerHeartbeatInterval:  workerHeartbeatInterval,
+		RetryBaseDelay:           retryBaseDelay,
+		RetryMaxDelay:            retryMaxDelay,
+		RecoveryPollInterval:     recoveryPollInterval,
 		DispatcherPollInterval:   dispatcherPollInterval,
 		DispatcherConfirmTimeout: dispatcherConfirmTimeout,
 		DispatcherBackoffMin:     dispatcherBackoffMin,

@@ -129,7 +129,8 @@ func TestDownloadGuardsAndIncompleteOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(jobs.ThumbnailPayload{InputID: input.ID})
-	job := jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload, Status: jobs.StatusSucceeded}
+	attemptID := uuid.NewString()
+	job := jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload, Status: jobs.StatusSucceeded, AttemptID: &attemptID}
 	job.Result, err = storage.Execute(context.Background(), job)
 	if err != nil {
 		t.Fatal(err)
@@ -156,21 +157,34 @@ func TestDownloadGuardsAndIncompleteOutput(t *testing.T) {
 	request(409)
 	job.Result = result
 	request(200)
-	outputPath := filepath.Join(root, "outputs", job.ID, "thumbnail.png")
+	outputPath := filepath.Join(root, "outputs", job.ID, attemptID, "thumbnail.png")
 	corrupted, err := os.ReadFile(outputPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// V4 results had no attempt_id and used the job-level file path.
+	legacyPath := filepath.Join(root, "outputs", job.ID, "thumbnail.png")
+	if err := os.WriteFile(legacyPath, corrupted, 0600); err != nil {
+		t.Fatal(err)
+	}
+	var legacy jobs.ThumbnailResult
+	if err := json.Unmarshal(result, &legacy); err != nil {
+		t.Fatal(err)
+	}
+	legacy.AttemptID = ""
+	job.Result, _ = json.Marshal(legacy)
+	request(200)
+	job.Result = result
 	corrupted[len(corrupted)-1] ^= 1 // Same byte count and dimensions, invalid IEND checksum.
 	if err := os.WriteFile(outputPath, corrupted, 0600); err != nil {
 		t.Fatal(err)
 	}
 	request(409)
-	if err := os.WriteFile(filepath.Join(root, "outputs", job.ID, "thumbnail.png"), []byte("partial"), 0600); err != nil {
+	if err := os.WriteFile(outputPath, []byte("partial"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	request(409)
-	if err := os.Remove(filepath.Join(root, "outputs", job.ID, "thumbnail.png")); err != nil {
+	if err := os.Remove(outputPath); err != nil {
 		t.Fatal(err)
 	}
 	request(404)

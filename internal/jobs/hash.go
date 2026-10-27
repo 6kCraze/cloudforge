@@ -11,15 +11,15 @@ import (
 
 func Execute(ctx context.Context, job Job) (json.RawMessage, error) {
 	if job.Type != TypeSyntheticSHA256 {
-		return nil, fmt.Errorf("unsupported job type %q", job.Type)
+		return nil, fmt.Errorf("%w: unsupported job type %q", ErrPermanentJob, job.Type)
 	}
 
 	var payload SHA256Payload
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
-		return nil, fmt.Errorf("decode SHA-256 payload: %w", err)
+		return nil, fmt.Errorf("%w: decode SHA-256 payload: %w", ErrPermanentJob, err)
 	}
 	if err := ValidateCreate(CreateInput{Type: job.Type, Payload: payload}); err != nil {
-		return nil, fmt.Errorf("validate SHA-256 payload: %w", err)
+		return nil, fmt.Errorf("%w: validate SHA-256 payload: %w", ErrPermanentJob, err)
 	}
 
 	started := time.Now()

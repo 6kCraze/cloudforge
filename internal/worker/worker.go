@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/6kCraze/cloudforge/internal/images"
 	"github.com/6kCraze/cloudforge/internal/jobs"
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	"github.com/google/uuid"
@@ -17,8 +18,10 @@ import (
 type JobStore interface {
 	Get(context.Context, string) (jobs.Job, error)
 	ClaimByID(context.Context, string, string) (jobs.Job, error)
-	MarkSucceeded(context.Context, string, string, json.RawMessage) error
-	MarkFailed(context.Context, string, string, string, string) error
+	Heartbeat(context.Context, string, string, string) error
+	MarkSucceeded(context.Context, string, string, string, json.RawMessage) error
+	MarkFailed(context.Context, string, string, string, string, string) error
+	ScheduleRetry(context.Context, string, string, string, string, string) (string, error)
 }
 
 type Processor func(context.Context, jobs.Job) (json.RawMessage, error)
@@ -29,18 +32,24 @@ const (
 	OutcomeExecuted          Outcome = "executed"
 	OutcomeTerminalDuplicate Outcome = "terminal_duplicate"
 	OutcomeRunningDeferred   Outcome = "running_deferred"
+	OutcomeRetryDeferred     Outcome = "retry_deferred"
 	OutcomeUnknownJob        Outcome = "unknown_job"
 )
 
 type Handler struct {
-	store     JobStore
-	workerID  string
-	processor Processor
-	logger    *slog.Logger
+	store             JobStore
+	workerID          string
+	processor         Processor
+	logger            *slog.Logger
+	heartbeatInterval time.Duration
 }
 
-func NewHandler(store JobStore, workerID string, processor Processor, logger *slog.Logger) *Handler {
-	return &Handler{store: store, workerID: workerID, processor: processor, logger: logger}
+func NewHandler(store JobStore, workerID string, processor Processor, logger *slog.Logger, interval ...time.Duration) *Handler {
+	heartbeatInterval := 5 * time.Second
+	if len(interval) != 0 {
+		heartbeatInterval = interval[0]
+	}
+	return &Handler{store: store, workerID: workerID, processor: processor, logger: logger, heartbeatInterval: heartbeatInterval}
 }
 
 // Handle reconciles a RabbitMQ delivery with PostgreSQL before doing work.
@@ -65,6 +74,9 @@ func (h *Handler) Handle(ctx context.Context, jobID string) (Outcome, error) {
 		case jobs.StatusRunning:
 			h.logger.Warn("running job delivery deferred", "job_id", jobID, "worker_id", h.workerID, "status", job.Status, "claimed_by", job.ClaimedBy)
 			return OutcomeRunningDeferred, nil
+		case jobs.StatusRetryWait:
+			h.logger.Info("retry waiting; duplicate delivery skipped", "job_id", jobID, "worker_id", h.workerID, "next_retry_at", job.NextRetryAt)
+			return OutcomeRetryDeferred, nil
 		case jobs.StatusQueued:
 			claimed, claimErr := h.store.ClaimByID(ctx, jobID, h.workerID)
 			if errors.Is(claimErr, jobs.ErrNotClaimable) {
@@ -83,20 +95,75 @@ func (h *Handler) Handle(ctx context.Context, jobID string) (Outcome, error) {
 }
 
 func (h *Handler) execute(ctx context.Context, job jobs.Job) (Outcome, error) {
+	if job.AttemptID == nil || *job.AttemptID == "" {
+		return "", fmt.Errorf("claimed job has no attempt ID")
+	}
+	attemptID := *job.AttemptID
 	h.logger.Info("job started", "job_id", job.ID, "worker_id", h.workerID, "attempt_count", job.AttemptCount)
-	result, err := h.processor(ctx, job)
-	if err != nil {
-		if markErr := h.store.MarkFailed(ctx, job.ID, h.workerID, "execution_failed", err.Error()); markErr != nil {
-			return "", fmt.Errorf("record job failure: %w", markErr)
+	processCtx, cancel := context.WithCancel(ctx)
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(h.heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-processCtx.Done():
+				heartbeatDone <- nil
+				return
+			case <-ticker.C:
+				renewCtx, stopRenew := context.WithTimeout(processCtx, h.heartbeatInterval)
+				err := h.store.Heartbeat(renewCtx, job.ID, h.workerID, attemptID)
+				stopRenew()
+				if err != nil {
+					cancel()
+					heartbeatDone <- fmt.Errorf("renew attempt lease: %w", err)
+					return
+				}
+			}
 		}
-		h.logger.Warn("job failed", "job_id", job.ID, "worker_id", h.workerID, "status", jobs.StatusFailed, "error", err)
+	}()
+	result, err := h.processor(processCtx, job)
+	cancel()
+	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil {
+		return "", heartbeatErr
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if err != nil {
+		if permanentFailure(err) {
+			if markErr := h.store.MarkFailed(ctx, job.ID, h.workerID, attemptID, permanentCode(err), err.Error()); markErr != nil {
+				return "", fmt.Errorf("record permanent job failure: %w", markErr)
+			}
+			h.logger.Warn("job permanently failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "error", err)
+			return OutcomeExecuted, nil
+		}
+		status, markErr := h.store.ScheduleRetry(ctx, job.ID, h.workerID, attemptID, "execution_failed", err.Error())
+		if markErr != nil {
+			return "", fmt.Errorf("record recoverable job failure: %w", markErr)
+		}
+		h.logger.Warn("job attempt failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "status", status, "error", err)
 		return OutcomeExecuted, nil
 	}
-	if err := h.store.MarkSucceeded(ctx, job.ID, h.workerID, result); err != nil {
+	if err := h.store.MarkSucceeded(ctx, job.ID, h.workerID, attemptID, result); err != nil {
 		return "", fmt.Errorf("record job success: %w", err)
 	}
 	h.logger.Info("job completed", "job_id", job.ID, "worker_id", h.workerID, "status", jobs.StatusSucceeded)
 	return OutcomeExecuted, nil
+}
+
+func permanentFailure(err error) bool {
+	var validation *jobs.ValidationError
+	return errors.Is(err, jobs.ErrPermanentJob) || errors.As(err, &validation) ||
+		errors.Is(err, images.ErrInvalid) || errors.Is(err, images.ErrUnsupported) ||
+		errors.Is(err, images.ErrDimensions) || errors.Is(err, images.ErrTooLarge)
+}
+
+func permanentCode(err error) string {
+	if errors.Is(err, jobs.ErrPermanentJob) {
+		return "invalid_job"
+	}
+	return "invalid_image"
 }
 
 type DeliveryConsumer interface {

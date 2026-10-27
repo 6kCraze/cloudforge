@@ -1,8 +1,8 @@
 # CloudForge
 
-CloudForge is an incremental learning project for durable background job processing. **Current phase: V4 image batches and browser application.** Select one to four JPEG/PNG images, submit a durable batch, watch actual job states, preview thumbnails, and download PNG results. Each image uses the existing job/outbox → RabbitMQ → Go worker flow. Synthetic SHA-256 jobs remain supported. PostgreSQL remains authoritative for every job lifecycle transition.
+CloudForge is an incremental learning project for durable background job processing. **Current phase: V5 reliability and crash recovery.** Select one to four JPEG/PNG images, submit a durable batch, watch actual job states, preview thumbnails, and download PNG results. Each image uses the job/outbox → RabbitMQ → Go worker flow. V5 adds leased ownership, bounded retries, and automatic redispatch; synthetic SHA-256 jobs remain supported. PostgreSQL remains authoritative for every job lifecycle transition.
 
-The [V4 image workflow](docs/v4-image-workflow.md) documents the browser, batch and single-image routes, limits, storage, and validation. V3 is released at annotated tag `v0.3.0`.
+The [V4 image workflow](docs/v4-image-workflow.md) documents the browser, batch and single-image routes, limits, storage, and validation. V4 is released at `v0.4.0`. [V5 safe ownership](docs/v5-safe-ownership.md) covers leases and fencing; [V5 recovery and fault validation](docs/v5-recovery.md) covers bounded retries, redispatch, and crash testing. The development database was upgraded to migration 7 after explicit approval and a verified pre-upgrade archive listing.
 
 The [roadmap](docs/roadmap.md) records the planned V0-V6 progression and optional backlog. [V1 architecture](docs/v1-architecture.md) explains the original polling flow. [V2.1 RabbitMQ infrastructure](docs/v2-rabbitmq-infrastructure.md) documents the broker. [V2.2 transactional outbox](docs/v2-2-transactional-outbox.md) explains atomic job creation and publication intent. [V2.3 outbox dispatcher](docs/v2-3-outbox-dispatcher.md) explains confirmed publication. [V2.4 RabbitMQ worker](docs/v2-4-rabbitmq-worker.md) covers manual ACK and redelivery. The [V2 final architecture](docs/v2-final-architecture.md), [failure matrix](docs/v2-failure-matrix.md), and [V2.5 validation report](docs/v2-5-validation-report.md) state the tested V2 guarantees. [V3 multiple-worker scaling](docs/v3-multiple-workers.md) explains competing consumers, deterministic concurrency validation, and the lightweight local demo.
 
@@ -58,7 +58,7 @@ Open [CloudForge](http://localhost:8080/) after starting the three processes. Ch
 
 Limits: **5 MiB per image, 21 MiB per batch request, 8 megapixels per image, and 8,192 pixels per side**. Configure the same absolute `STORAGE_ROOT` for API and worker, or leave it blank for the shared per-user cache directory. No Node.js or frontend build is required; Go embeds the HTML/CSS/JavaScript.
 
-Existing development databases need migrations **00004** (image jobs) and **00005** (batch/file metadata). They preserve existing jobs. The local development database for this checkout reached version 5 after an approved upgrade on October 26, 2026; other databases must be checked and backed up before upgrading. Initial browser validation used the isolated test database/vhost, followed by a live development-browser demonstration.
+Existing databases need migrations **00004** and **00005** for images and batches, then **00006** and **00007** for V5 ownership and retries. They preserve existing jobs. The local development database for this checkout reached version 7 after an approved, backed-up upgrade; other databases must be checked and backed up before upgrading. See the [V5 upgrade record](docs/v5-recovery.md).
 
 The synthetic SHA-256 API remains available. Submit and inspect a job from a fourth terminal:
 
@@ -92,11 +92,11 @@ Invalid input returns a structured `400` response:
 
 A valid but unknown UUID returns `404`. A malformed UUID returns structured `400`.
 
-## Intentional running-state crash behavior
+## Historical V2 running-state crash behavior
 
-V2.4 still has no lease, heartbeat, or recovery loop. If the worker process is forcibly stopped after it claims a job but before it records a terminal result and ACKs, RabbitMQ redelivers the message. PostgreSQL correctly retains the job as `running`, and the replacement worker conservatively refuses to re-execute it. This is a deliberate observed failure for the later recovery phase.
+V2.4 had no lease, heartbeat, or recovery loop. If the worker process was forcibly stopped after it claimed a job but before it recorded a terminal result and ACKed, RabbitMQ redelivered the message. PostgreSQL retained the job as `running`, and the replacement worker conservatively refused to re-execute it. V5 now recovers such jobs after their lease expires; the steps below describe the historical V2 demonstration.
 
-To demonstrate it, submit a long job with `iterations = 50000000`, repeatedly GET it until it says `running`, then force-stop the worker process rather than using Ctrl+C. RabbitMQ makes the unacknowledged message ready again. Restart the worker and GET the job again. It remains `running`; the replacement ACKs the redelivery without running SHA-256 again. The integration test `TestUnackedDeliveryIsRedeliveredAndRunningJobIsNotReexecuted` proves this with real RabbitMQ.
+On the historical V2 tag, the demonstration submitted a long job with `iterations = 50000000`, waited for `running`, then force-stopped the worker. RabbitMQ made the unacknowledged message ready again, but the replacement worker left the PostgreSQL job in `running`. The integration test `TestUnackedDeliveryIsRedeliveredAndRunningJobIsNotReexecuted` proved that V2 limitation with real RabbitMQ. Do not use that CPU-heavy demonstration for V5 smoke testing.
 
 Ctrl+C is different: graceful shutdown cancels consumer intake and lets the current delivery reach a durable terminal state and ACK before the worker exits.
 
@@ -108,7 +108,6 @@ docker compose ps
 . .\scripts\load-env.ps1
 go run ./cmd/dbcheck
 go run ./cmd/migrate up
-go run ./cmd/migrate down
 go run ./cmd/migrate status
 go test ./...
 go test -race ./...
@@ -123,7 +122,7 @@ Integration fixtures require explicit isolated test URLs, a dedicated `cloudforg
 docker run --rm --pull=never --cpus=1 --memory=2g -v "${PWD}:/src" -w /src golang:1.27 go test -p 1 -race ./...
 ```
 
-Do not use `docker compose down -v` for a normal shutdown because `-v` deletes the database volume.
+Do not use `docker compose down -v` for a normal shutdown because `-v` deletes the database volume. Do not run a V5 down migration as a routine rollback: it can discard attempt history and cannot represent multiple retry-ready events under the older schema. Follow the [reviewed restore guidance](docs/v5-recovery.md).
 
 ## Current components
 
@@ -134,12 +133,12 @@ client -> Go API -> PostgreSQL jobs + outbox -> dispatcher -> RabbitMQ
 ```
 
 - `cmd/api` accepts and reads jobs over HTTP.
-- `cmd/dispatcher` publishes unpublished outbox events with confirms.
-- `cmd/worker` consumes `job.ready` with manual ACK and executes `synthetic.sha256` jobs.
+- `cmd/dispatcher` publishes unpublished outbox events with confirms and recovers expired jobs.
+- `cmd/worker` consumes `job.ready` with manual ACK and executes thumbnail or `synthetic.sha256` jobs under leased attempt ownership.
 - `internal/jobs` owns validation, lifecycle persistence, atomic claim-by-ID, and workload execution.
 - `internal/httpapi` owns routes and structured HTTP errors.
 - `internal/worker` owns delivery policy, duplicate handling, reconnection, and graceful shutdown.
-- `cmd/migrate` applies reversible Goose migrations.
+- `cmd/migrate` applies Goose migrations; review V5 rollback constraints before any down migration.
 
 RabbitMQ carries `job.ready` notifications and tracks Ready/Unacked delivery state. PostgreSQL remains canonical job state. Redis remains deferred until measurements show a concrete need.
 

@@ -69,7 +69,8 @@ func TestThumbnailDimensionsAlphaAndExclusivePublication(t *testing.T) {
 				t.Fatal(err)
 			}
 			payload, _ := json.Marshal(jobs.ThumbnailPayload{InputID: input.ID})
-			job := jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload}
+			attemptID := uuid.NewString()
+			job := jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload, AttemptID: &attemptID}
 			raw, err := s.Execute(context.Background(), job)
 			if err != nil {
 				t.Fatal(err)
@@ -81,7 +82,7 @@ func TestThumbnailDimensionsAlphaAndExclusivePublication(t *testing.T) {
 			if result.OutputID != job.ID || result.Width != tc.wantW || result.Height != tc.wantH || result.Bytes <= 0 {
 				t.Fatalf("result=%+v", result)
 			}
-			file, err := s.OpenOutput(job.ID)
+			file, err := s.OpenOutput(job.ID, attemptID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,14 +100,14 @@ func TestThumbnailDimensionsAlphaAndExclusivePublication(t *testing.T) {
 					t.Fatalf("alpha=%d want %d", alpha, uint32(tc.alpha)*257)
 				}
 			}
-			before, err := os.ReadFile(filepath.Join(root, "outputs", job.ID, "thumbnail.png"))
+			before, err := os.ReadFile(filepath.Join(root, "outputs", job.ID, attemptID, "thumbnail.png"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.Execute(context.Background(), job); err == nil {
 				t.Fatal("existing output was overwritten")
 			}
-			after, _ := os.ReadFile(filepath.Join(root, "outputs", job.ID, "thumbnail.png"))
+			after, _ := os.ReadFile(filepath.Join(root, "outputs", job.ID, attemptID, "thumbnail.png"))
 			if !bytes.Equal(before, after) {
 				t.Fatal("existing output changed")
 			}
@@ -178,7 +179,54 @@ func TestStorageAndWorkerRejectUnsafePathsAndTamperedInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload, _ := json.Marshal(jobs.ThumbnailPayload{InputID: input.ID})
-	if _, err := s.Execute(context.Background(), jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload}); !errors.Is(err, ErrDimensions) {
+	attemptID := uuid.NewString()
+	if _, err := s.Execute(context.Background(), jobs.Job{ID: uuid.NewString(), Type: jobs.TypeImageThumbnail, Payload: payload, AttemptID: &attemptID}); !errors.Is(err, ErrDimensions) {
 		t.Fatalf("worker did not revalidate input: %v", err)
+	}
+}
+
+func TestAttemptOutputsDoNotReplaceOneAnother(t *testing.T) {
+	s, root := openTestStorage(t)
+	firstInput, err := s.SaveInput(bytes.NewReader(encodedImage(t, 2, 2, "png", 255)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInput, err := s.SaveInput(bytes.NewReader(encodedImage(t, 3, 3, "png", 96)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobID, firstAttempt, secondAttempt := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	makeJob := func(inputID, attemptID string) jobs.Job {
+		payload, _ := json.Marshal(jobs.ThumbnailPayload{InputID: inputID})
+		return jobs.Job{ID: jobID, Type: jobs.TypeImageThumbnail, Payload: payload, AttemptID: &attemptID}
+	}
+	firstResult, err := s.Execute(context.Background(), makeJob(firstInput.ID, firstAttempt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(root, "outputs", jobID, firstAttempt, "thumbnail.png")
+	before, err := os.ReadFile(firstPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondResult, err := s.Execute(context.Background(), makeJob(secondInput.ID, secondAttempt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(firstPath)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("first candidate changed: %v", err)
+	}
+	if bytes.Equal(firstResult, secondResult) {
+		t.Fatal("attempt results must identify distinct outputs")
+	}
+	file, err := s.OpenOutput(jobID, secondAttempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	img, err := png.Decode(file)
+	if err != nil || img.Bounds().Dx() != 3 {
+		t.Fatalf("second output: %v %v", img, err)
 	}
 }

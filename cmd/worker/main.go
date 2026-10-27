@@ -51,13 +51,13 @@ func run(logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
-	store := jobs.NewStore(pool)
+	store := jobs.NewStoreWithPolicy(pool, cfg.WorkerLeaseDuration, cfg.RetryBaseDelay, cfg.RetryMaxDelay)
 	storage, err := images.Open(cfg.StorageRoot)
 	if err != nil {
 		return fmt.Errorf("open storage: %w", err)
 	}
 	defer storage.Close()
-	handler := worker.NewHandler(store, workerID, storage.Execute, logger)
+	handler := worker.NewHandler(store, workerID, storage.Execute, logger, cfg.WorkerHeartbeatInterval)
 	connect := func(ctx context.Context) (worker.DeliveryConsumer, error) {
 		return cloudrabbit.OpenConsumer(ctx, cfg.RabbitMQURL, workerID)
 	}

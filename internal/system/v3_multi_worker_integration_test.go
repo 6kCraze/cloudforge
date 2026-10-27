@@ -238,7 +238,7 @@ func newV3Fixture(t *testing.T) *v3Fixture {
 		_, _ = lock.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, integrationLockID)
 		lock.Release()
 	})
-	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE cloudforge.job_attempts, cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +262,7 @@ func newV3Fixture(t *testing.T) *v3Fixture {
 	}
 	t.Cleanup(func() {
 		_, _ = admin.QueuePurge(cloudrabbit.QueueName, false)
-		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
+		_, _ = pool.Exec(context.Background(), `TRUNCATE cloudforge.job_attempts, cloudforge.batch_images, cloudforge.batches, cloudforge.outbox_events, cloudforge.jobs`)
 	})
 
 	return &v3Fixture{

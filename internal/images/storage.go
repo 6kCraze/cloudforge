@@ -97,6 +97,27 @@ func (s *Store) finalize(stage, category, id, filename string) error {
 	return nil
 }
 
+// An attempt reserves its own directory. Even a stale worker may finish a
+// candidate file, but it cannot replace another attempt's bytes.
+func (s *Store) finalizeAttempt(stage, jobID, attemptID string) error {
+	if !validID(jobID) || !validID(attemptID) {
+		return errors.New("invalid output identifier")
+	}
+	jobDir := "outputs/" + jobID
+	if err := s.root.Mkdir(jobDir, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	attemptDir := jobDir + "/" + attemptID
+	if err := s.root.Mkdir(attemptDir, 0700); err != nil {
+		return err
+	}
+	if err := s.root.Rename(stage, attemptDir+"/thumbnail.png"); err != nil {
+		_ = s.root.Remove(attemptDir)
+		return err
+	}
+	return nil
+}
+
 func (s *Store) checkBudget() error {
 	var used, inputs int64
 	err := fs.WalkDir(s.root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
@@ -222,9 +243,16 @@ func (s *Store) RemoveInput(id string) error {
 	return s.root.RemoveAll("inputs/" + id)
 }
 
-func (s *Store) OpenOutput(jobID string) (*os.File, error) {
+func (s *Store) OpenOutput(jobID string, attemptID ...string) (*os.File, error) {
 	if !validID(jobID) {
 		return nil, fmt.Errorf("invalid output identifier")
 	}
-	return s.root.Open("outputs/" + jobID + "/thumbnail.png")
+	path := "outputs/" + jobID + "/thumbnail.png" // V4 result without attempt_id.
+	if len(attemptID) > 0 && attemptID[0] != "" {
+		if !validID(attemptID[0]) {
+			return nil, fmt.Errorf("invalid attempt identifier")
+		}
+		path = "outputs/" + jobID + "/" + attemptID[0] + "/thumbnail.png"
+	}
+	return s.root.Open(path)
 }

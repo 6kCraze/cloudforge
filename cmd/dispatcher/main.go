@@ -12,6 +12,7 @@ import (
 	"github.com/6kCraze/cloudforge/internal/config"
 	"github.com/6kCraze/cloudforge/internal/database"
 	"github.com/6kCraze/cloudforge/internal/dispatcher"
+	"github.com/6kCraze/cloudforge/internal/jobs"
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	cloudrabbit "github.com/6kCraze/cloudforge/internal/rabbitmq"
 )
@@ -43,6 +44,14 @@ func run(logger *slog.Logger) error {
 	defer pool.Close()
 
 	store := outbox.NewStore(pool)
+	recoveryDone := make(chan struct{})
+	go func() {
+		defer close(recoveryDone)
+		dispatcher.RunRecovery(ctx,
+			jobs.NewStoreWithPolicy(pool, cfg.WorkerLeaseDuration, cfg.RetryBaseDelay, cfg.RetryMaxDelay),
+			cfg.RecoveryPollInterval, logger)
+	}()
+	defer func() { stop(); <-recoveryDone }()
 	connect := func(connectCtx context.Context) (dispatcher.Publisher, error) {
 		return cloudrabbit.Open(connectCtx, cfg.RabbitMQURL, cfg.DispatcherConfirmTimeout)
 	}

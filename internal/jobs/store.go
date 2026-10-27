@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/6kCraze/cloudforge/internal/outbox"
 	"github.com/google/uuid"
@@ -15,11 +16,22 @@ import (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool          *pgxpool.Pool
+	leaseDuration time.Duration
+	retryBase     time.Duration
+	retryMax      time.Duration
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+	return NewStoreWithLease(pool, 30*time.Second)
+}
+
+func NewStoreWithLease(pool *pgxpool.Pool, lease time.Duration) *Store {
+	return NewStoreWithPolicy(pool, lease, time.Second, 4*time.Second)
+}
+
+func NewStoreWithPolicy(pool *pgxpool.Pool, lease, retryBase, retryMax time.Duration) *Store {
+	return &Store{pool: pool, leaseDuration: lease, retryBase: retryBase, retryMax: retryMax}
 }
 
 func (s *Store) Create(ctx context.Context, input CreateInput) (Job, error) {
@@ -104,7 +116,7 @@ func (s *Store) ClaimNext(ctx context.Context, workerID string) (Job, error) {
 	err = tx.QueryRow(ctx, `
 		SELECT id
 		FROM cloudforge.jobs
-		WHERE status = 'queued'
+		WHERE status = 'queued' AND next_retry_at IS NULL
 		ORDER BY created_at, id
 		FOR UPDATE SKIP LOCKED
 		LIMIT 1
@@ -116,20 +128,9 @@ func (s *Store) ClaimNext(ctx context.Context, workerID string) (Job, error) {
 		return Job{}, fmt.Errorf("select queued job: %w", err)
 	}
 
-	row := tx.QueryRow(ctx, `
-		UPDATE cloudforge.jobs
-		SET status = 'running',
-			attempt_count = attempt_count + 1,
-			claimed_by = $2,
-			started_at = now(),
-			updated_at = now()
-		WHERE id = $1
-		RETURNING `+jobColumns,
-		id, workerID,
-	)
-	job, err := scanJob(row)
+	job, err := s.claimInTransaction(ctx, tx, id, workerID)
 	if err != nil {
-		return Job{}, fmt.Errorf("mark job running: %w", err)
+		return Job{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return Job{}, fmt.Errorf("commit claim transaction: %w", err)
@@ -141,17 +142,41 @@ func (s *Store) ClaimNext(ctx context.Context, workerID string) (Job, error) {
 // running. RabbitMQ may deliver the same job more than once, so the status
 // predicate is the database-backed deduplication guard.
 func (s *Store) ClaimByID(ctx context.Context, id, workerID string) (Job, error) {
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return Job{}, fmt.Errorf("begin claim transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	job, err := s.claimInTransaction(ctx, tx, id, workerID)
+	if err != nil {
+		return Job{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Job{}, fmt.Errorf("commit claim transaction: %w", err)
+	}
+	return job, nil
+}
+
+func (s *Store) claimInTransaction(ctx context.Context, tx pgx.Tx, id, workerID string) (Job, error) {
+	if workerID == "" {
+		return Job{}, errors.New("worker ID is required")
+	}
+	attemptID := uuid.NewString()
+	row := tx.QueryRow(ctx, `
 		UPDATE cloudforge.jobs
 		SET status = 'running',
 			attempt_count = attempt_count + 1,
 			claimed_by = $2,
-			started_at = now(),
-			updated_at = now()
+			attempt_id = $3,
+			lease_expires_at = clock_timestamp() + $4::bigint * interval '1 microsecond',
+			next_retry_at = NULL,
+			result = NULL, error_code = NULL, error_message = NULL, completed_at = NULL,
+			started_at = clock_timestamp(),
+			updated_at = clock_timestamp()
 		WHERE id = $1
-		  AND status = 'queued'
+		  AND status = 'queued' AND next_retry_at IS NULL
 		RETURNING `+jobColumns,
-		id, workerID,
+		id, workerID, attemptID, s.leaseDuration.Microseconds(),
 	)
 	job, err := scanJob(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -160,52 +185,95 @@ func (s *Store) ClaimByID(ctx context.Context, id, workerID string) (Job, error)
 	if err != nil {
 		return Job{}, fmt.Errorf("claim job by ID: %w", err)
 	}
+	_, err = tx.Exec(ctx, `INSERT INTO cloudforge.job_attempts
+		(attempt_id, job_id, attempt_number, worker_id, started_at, last_heartbeat_at, lease_expires_at)
+		VALUES ($1, $2, $3, $4, $5, $5, $6)`, attemptID, id, job.AttemptCount, workerID, job.StartedAt, job.LeaseExpiresAt)
+	if err != nil {
+		return Job{}, fmt.Errorf("record claim attempt: %w", err)
+	}
 	return job, nil
 }
 
-func (s *Store) MarkSucceeded(ctx context.Context, id, workerID string, result json.RawMessage) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE cloudforge.jobs
-		SET status = 'succeeded',
-			result = $3,
-			error_code = NULL,
-			error_message = NULL,
-			completed_at = now(),
-			updated_at = now()
-		WHERE id = $1 AND status = 'running' AND claimed_by = $2
-	`, id, workerID, result)
+func (s *Store) Heartbeat(ctx context.Context, id, workerID, attemptID string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("mark job succeeded: %w", err)
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var expires time.Time
+	err = tx.QueryRow(ctx, `UPDATE cloudforge.jobs SET
+		lease_expires_at = clock_timestamp() + $4::bigint * interval '1 microsecond',
+		updated_at = clock_timestamp()
+		WHERE id = $1 AND status = 'running' AND claimed_by = $2 AND attempt_id = $3
+		AND lease_expires_at > clock_timestamp()
+		RETURNING lease_expires_at`, id, workerID, attemptID, s.leaseDuration.Microseconds()).Scan(&expires)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrOwnershipLost
+	}
+	if err != nil {
+		return fmt.Errorf("renew job lease: %w", err)
+	}
+	tag, err := tx.Exec(ctx, `UPDATE cloudforge.job_attempts SET
+		lease_expires_at = $2, last_heartbeat_at = clock_timestamp()
+		WHERE attempt_id = $1 AND outcome = 'running'`, attemptID, expires)
+	if err != nil {
+		return fmt.Errorf("record heartbeat: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
-		return fmt.Errorf("mark job succeeded: job is not running for worker %q", workerID)
+		return ErrOwnershipLost
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
-func (s *Store) MarkFailed(ctx context.Context, id, workerID, code, message string) error {
-	tag, err := s.pool.Exec(ctx, `
-		UPDATE cloudforge.jobs
-		SET status = 'failed',
-			result = NULL,
-			error_code = $3,
-			error_message = $4,
-			completed_at = now(),
-			updated_at = now()
-		WHERE id = $1 AND status = 'running' AND claimed_by = $2
-	`, id, workerID, code, message)
+func (s *Store) MarkSucceeded(ctx context.Context, id, workerID, attemptID string, result json.RawMessage) error {
+	return s.markTerminal(ctx, id, workerID, attemptID, "succeeded", result, "", "")
+}
+
+func (s *Store) MarkFailed(ctx context.Context, id, workerID, attemptID, code, message string) error {
+	return s.markTerminal(ctx, id, workerID, attemptID, "failed", nil, code, message)
+}
+
+func (s *Store) markTerminal(ctx context.Context, id, workerID, attemptID, outcome string, result json.RawMessage, code, message string) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("mark job failed: %w", err)
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	var completed time.Time
+	err = tx.QueryRow(ctx, `UPDATE cloudforge.jobs SET status = $4,
+		result = $5, error_code = NULLIF($6, ''), error_message = NULLIF($7, ''),
+		completed_at = clock_timestamp(), updated_at = clock_timestamp()
+		WHERE id = $1 AND status = 'running' AND claimed_by = $2 AND attempt_id = $3
+		AND lease_expires_at > clock_timestamp()
+		AND (type <> 'image.thumbnail' OR $4 <> 'succeeded' OR
+			($5::jsonb->>'attempt_id' = attempt_id::text AND $5::jsonb->>'output_id' = id::text))
+		RETURNING completed_at`, id, workerID, attemptID, outcome, result, code, message).Scan(&completed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrOwnershipLost
+	}
+	if err != nil {
+		return fmt.Errorf("mark job %s: %w", outcome, err)
+	}
+	decision := ""
+	if outcome == "failed" {
+		decision = "permanent"
+	}
+	tag, err := tx.Exec(ctx, `UPDATE cloudforge.job_attempts SET outcome = $2, completed_at = $3,
+		error_code = NULLIF($4, ''), error_message = NULLIF($5, ''), retry_decision = NULLIF($6, '')
+		WHERE attempt_id = $1 AND outcome = 'running'`, attemptID, outcome, completed, code, message, decision)
+	if err != nil {
+		return fmt.Errorf("record attempt %s: %w", outcome, err)
 	}
 	if tag.RowsAffected() != 1 {
-		return fmt.Errorf("mark job failed: job is not running for worker %q", workerID)
+		return ErrOwnershipLost
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 const jobColumns = `
 	id::text, type, status, payload, result, error_code, error_message,
-	attempt_count, claimed_by, created_at, updated_at, started_at, completed_at`
+	attempt_count, claimed_by, created_at, updated_at, started_at, completed_at,
+	attempt_id::text, lease_expires_at, next_retry_at`
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -227,6 +295,9 @@ func scanJob(row rowScanner) (Job, error) {
 		&job.UpdatedAt,
 		&job.StartedAt,
 		&job.CompletedAt,
+		&job.AttemptID,
+		&job.LeaseExpiresAt,
+		&job.NextRetryAt,
 	)
 	return job, err
 }

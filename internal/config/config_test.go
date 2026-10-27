@@ -85,3 +85,41 @@ func TestLoadRejectsDispatcherBackoffMaxBelowMin(t *testing.T) {
 		t.Fatal("expected invalid dispatcher backoff error")
 	}
 }
+
+func TestWorkerLeaseAndHeartbeatBounds(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("WORKER_LEASE_DURATION", "30s")
+	t.Setenv("WORKER_HEARTBEAT_INTERVAL", "5s")
+	if cfg, err := Load(); err != nil || cfg.WorkerLeaseDuration != 30*time.Second || cfg.WorkerHeartbeatInterval != 5*time.Second {
+		t.Fatalf("config=%+v err=%v", cfg, err)
+	}
+	t.Setenv("WORKER_HEARTBEAT_INTERVAL", "10s")
+	if _, err := Load(); err == nil {
+		t.Fatal("heartbeat at one third of lease accepted")
+	}
+	t.Setenv("WORKER_HEARTBEAT_INTERVAL", "5s")
+	t.Setenv("WORKER_LEASE_DURATION", "11m")
+	if _, err := Load(); err == nil {
+		t.Fatal("unbounded lease accepted")
+	}
+}
+
+func TestRetryAndRecoveryBounds(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://example")
+	t.Setenv("RETRY_BASE_DELAY", "1s")
+	t.Setenv("RETRY_MAX_DELAY", "4s")
+	t.Setenv("RECOVERY_POLL_INTERVAL", "500ms")
+	cfg, err := Load()
+	if err != nil || cfg.RetryBaseDelay != time.Second || cfg.RetryMaxDelay != 4*time.Second || cfg.RecoveryPollInterval != 500*time.Millisecond {
+		t.Fatalf("config=%+v err=%v", cfg, err)
+	}
+	t.Setenv("RETRY_MAX_DELAY", "500ms")
+	if _, err := Load(); err == nil {
+		t.Fatal("retry maximum below base accepted")
+	}
+	t.Setenv("RETRY_MAX_DELAY", "4s")
+	t.Setenv("RECOVERY_POLL_INTERVAL", "31s")
+	if _, err := Load(); err == nil {
+		t.Fatal("unbounded recovery interval accepted")
+	}
+}

@@ -17,27 +17,130 @@ import (
 )
 
 type fakeStore struct {
-	get   func(context.Context, string) (jobs.Job, error)
-	claim func(context.Context, string, string) (jobs.Job, error)
-	done  func(context.Context, string, string, json.RawMessage) error
-	fail  func(context.Context, string, string, string, string) error
+	get       func(context.Context, string) (jobs.Job, error)
+	claim     func(context.Context, string, string) (jobs.Job, error)
+	done      func(context.Context, string, string, json.RawMessage) error
+	fail      func(context.Context, string, string, string, string) error
+	heartbeat func(context.Context, string, string, string) error
+	retry     func(context.Context, string, string, string, string, string) (string, error)
 }
 
 func (f fakeStore) Get(ctx context.Context, id string) (jobs.Job, error) {
 	return f.get(ctx, id)
 }
 func (f fakeStore) ClaimByID(ctx context.Context, id, workerID string) (jobs.Job, error) {
-	return f.claim(ctx, id, workerID)
+	job, err := f.claim(ctx, id, workerID)
+	if err == nil && job.AttemptID == nil {
+		attemptID := uuid.NewString()
+		job.AttemptID = &attemptID
+	}
+	return job, err
 }
-func (f fakeStore) MarkSucceeded(ctx context.Context, id, workerID string, result json.RawMessage) error {
+func (f fakeStore) Heartbeat(ctx context.Context, id, workerID, attemptID string) error {
+	if f.heartbeat != nil {
+		return f.heartbeat(ctx, id, workerID, attemptID)
+	}
+	return nil
+}
+func (f fakeStore) MarkSucceeded(ctx context.Context, id, workerID, attemptID string, result json.RawMessage) error {
 	return f.done(ctx, id, workerID, result)
 }
-func (f fakeStore) MarkFailed(ctx context.Context, id, workerID, code, message string) error {
+func (f fakeStore) MarkFailed(ctx context.Context, id, workerID, attemptID, code, message string) error {
 	return f.fail(ctx, id, workerID, code, message)
+}
+func (f fakeStore) ScheduleRetry(ctx context.Context, id, workerID, attemptID, code, message string) (string, error) {
+	if f.retry != nil {
+		return f.retry(ctx, id, workerID, attemptID, code, message)
+	}
+	return jobs.StatusRetryWait, nil
 }
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestHeartbeatOwnershipLossCancelsProcessorWithoutTerminalWrite(t *testing.T) {
+	jobID, attemptID := uuid.NewString(), uuid.NewString()
+	var terminals int
+	store := fakeStore{
+		get: func(context.Context, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusQueued}, nil
+		},
+		claim: func(context.Context, string, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusRunning, AttemptID: &attemptID}, nil
+		},
+		heartbeat: func(_ context.Context, id, workerID, token string) error {
+			if id != jobID || workerID != "worker-a" || token != attemptID {
+				t.Errorf("wrong heartbeat identity")
+			}
+			return jobs.ErrOwnershipLost
+		},
+		done: func(context.Context, string, string, json.RawMessage) error { terminals++; return nil },
+		fail: func(context.Context, string, string, string, string) error { terminals++; return nil },
+	}
+	handler := NewHandler(store, "worker-a", func(ctx context.Context, _ jobs.Job) (json.RawMessage, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}, discardLogger(), time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := handler.Handle(ctx, jobID)
+	if !errors.Is(err, jobs.ErrOwnershipLost) || terminals != 0 {
+		t.Fatalf("err=%v terminals=%d", err, terminals)
+	}
+}
+
+func TestActiveHandlerRenewsLeaseBeforeCompleting(t *testing.T) {
+	jobID, attemptID := uuid.NewString(), uuid.NewString()
+	heartbeatSeen := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	store := fakeStore{
+		get: func(context.Context, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusQueued}, nil
+		},
+		claim: func(context.Context, string, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusRunning, AttemptID: &attemptID}, nil
+		},
+		heartbeat: func(_ context.Context, id, workerID, token string) error {
+			if id != jobID || workerID != "worker-a" || token != attemptID {
+				return errors.New("wrong heartbeat identity")
+			}
+			select {
+			case heartbeatSeen <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+		done: func(_ context.Context, id, workerID string, result json.RawMessage) error {
+			if id != jobID || workerID != "worker-a" || string(result) != `{"ok":true}` {
+				return errors.New("wrong terminal result")
+			}
+			return nil
+		},
+		fail: func(context.Context, string, string, string, string) error { return errors.New("unexpected failure") },
+	}
+	handler := NewHandler(store, "worker-a", func(context.Context, jobs.Job) (json.RawMessage, error) {
+		<-release
+		return json.RawMessage(`{"ok":true}`), nil
+	}, discardLogger(), time.Millisecond)
+	result := make(chan error, 1)
+	go func() { _, err := handler.Handle(context.Background(), jobID); result <- err }()
+	select {
+	case <-heartbeatSeen:
+	case <-time.After(time.Second):
+		t.Fatal("active job did not renew lease")
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handler did not complete")
+	}
 }
 
 func TestHandlerExecutesQueuedJobAndPersistsSuccess(t *testing.T) {
@@ -77,7 +180,7 @@ func TestHandlerExecutesQueuedJobAndPersistsSuccess(t *testing.T) {
 	}
 }
 
-func TestHandlerPersistsProcessorFailure(t *testing.T) {
+func TestHandlerSchedulesRecoverableProcessorFailure(t *testing.T) {
 	jobID := uuid.NewString()
 	failed := false
 	store := fakeStore{
@@ -91,12 +194,12 @@ func TestHandlerPersistsProcessorFailure(t *testing.T) {
 			t.Fatal("success must not be recorded")
 			return nil
 		},
-		fail: func(_ context.Context, id, workerID, code, message string) error {
+		retry: func(_ context.Context, id, workerID, _, code, message string) (string, error) {
 			failed = true
 			if id != jobID || workerID != "worker-a" || code != "execution_failed" || message != "boom" {
 				t.Fatalf("failure values = %q/%q/%q/%q", id, workerID, code, message)
 			}
-			return nil
+			return jobs.StatusRetryWait, nil
 		},
 	}
 	handler := NewHandler(store, "worker-a", func(context.Context, jobs.Job) (json.RawMessage, error) {
@@ -106,6 +209,63 @@ func TestHandlerPersistsProcessorFailure(t *testing.T) {
 	outcome, err := handler.Handle(context.Background(), jobID)
 	if err != nil || outcome != OutcomeExecuted || !failed {
 		t.Fatalf("outcome=%q failed=%v err=%v", outcome, failed, err)
+	}
+}
+
+func TestHandlerPermanentlyFailsInvalidJob(t *testing.T) {
+	jobID := uuid.NewString()
+	failed := false
+	store := fakeStore{
+		get: func(context.Context, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusQueued}, nil
+		},
+		claim: func(context.Context, string, string) (jobs.Job, error) {
+			return jobs.Job{ID: jobID, Status: jobs.StatusRunning}, nil
+		},
+		fail: func(_ context.Context, id, workerID, code, _ string) error {
+			failed = id == jobID && workerID == "worker-a" && code == "invalid_job"
+			return nil
+		},
+		retry: func(context.Context, string, string, string, string, string) (string, error) {
+			t.Fatal("invalid job retried")
+			return "", nil
+		},
+	}
+	handler := NewHandler(store, "worker-a", func(context.Context, jobs.Job) (json.RawMessage, error) { return nil, jobs.ErrPermanentJob }, discardLogger())
+	if outcome, err := handler.Handle(context.Background(), jobID); err != nil || outcome != OutcomeExecuted || !failed {
+		t.Fatalf("outcome=%s err=%v failed=%v", outcome, err, failed)
+	}
+}
+
+func TestRecoverableFailureAcknowledgedOnlyAfterDurableRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		persistErr        error
+		wantAck, wantNack int
+	}{
+		{name: "durable retry", wantAck: 1},
+		{name: "database error", persistErr: errors.New("database unavailable"), wantNack: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			jobID := uuid.NewString()
+			ack := &fakeAcknowledger{}
+			store := fakeStore{
+				get: func(context.Context, string) (jobs.Job, error) {
+					return jobs.Job{ID: jobID, Status: jobs.StatusQueued}, nil
+				},
+				claim: func(context.Context, string, string) (jobs.Job, error) {
+					return jobs.Job{ID: jobID, Status: jobs.StatusRunning}, nil
+				},
+				retry: func(context.Context, string, string, string, string, string) (string, error) {
+					return jobs.StatusRetryWait, tc.persistErr
+				},
+			}
+			runner := NewRabbitWorker(NewHandler(store, "worker-a", func(context.Context, jobs.Job) (json.RawMessage, error) { return nil, errors.New("temporary failure") }, discardLogger()), nil, "worker-a", time.Millisecond, time.Second, discardLogger())
+			err := runner.handleDelivery(context.Background(), validDelivery(ack, jobID))
+			if (err != nil) != (tc.persistErr != nil) || ack.acks != tc.wantAck || ack.nacks != tc.wantNack || (tc.wantNack == 1 && !ack.requeue) {
+				t.Fatalf("err=%v ack=%d nack=%d requeue=%v", err, ack.acks, ack.nacks, ack.requeue)
+			}
+		})
 	}
 }
 
@@ -119,6 +279,7 @@ func TestHandlerSkipsNonExecutableDatabaseStates(t *testing.T) {
 		{name: "succeeded duplicate", status: jobs.StatusSucceeded, outcome: OutcomeTerminalDuplicate},
 		{name: "failed duplicate", status: jobs.StatusFailed, outcome: OutcomeTerminalDuplicate},
 		{name: "running remains stuck", status: jobs.StatusRunning, outcome: OutcomeRunningDeferred},
+		{name: "retry wait skips duplicate", status: jobs.StatusRetryWait, outcome: OutcomeRetryDeferred},
 		{name: "unknown is dropped", getErr: jobs.ErrNotFound, outcome: OutcomeUnknownJob},
 	}
 	for _, test := range tests {

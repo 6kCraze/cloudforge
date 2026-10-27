@@ -110,7 +110,14 @@ func (a *API) downloadThumbnail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "incomplete_result", "job has no complete thumbnail result", "")
 		return
 	}
-	file, err := a.images.OpenOutput(job.ID)
+	if result.AttemptID != "" {
+		attempt, parseErr := uuid.Parse(result.AttemptID)
+		if parseErr != nil || attempt.String() != result.AttemptID {
+			writeError(w, 409, "incomplete_result", "job has invalid thumbnail attempt", "")
+			return
+		}
+	}
+	file, err := a.images.OpenOutput(job.ID, result.AttemptID)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, 404, "output_missing", "thumbnail file was not found", "")
 		return

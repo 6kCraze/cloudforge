@@ -36,6 +36,7 @@ type Batch struct {
 	JobCount  int        `json:"job_count"`
 	Queued    int        `json:"queued"`
 	Running   int        `json:"running"`
+	RetryWait int        `json:"retry_wait"`
 	Succeeded int        `json:"succeeded"`
 	Failed    int        `json:"failed"`
 	Jobs      []BatchJob `json:"jobs"`
@@ -114,7 +115,8 @@ func (s *Store) GetBatch(ctx context.Context, id string) (Batch, error) {
 	rows, err := s.pool.Query(ctx, `SELECT b.id::text, b.created_at,
         i.input_id::text, i.original_name, i.format, i.bytes, i.width, i.height,
         j.id::text, j.type, j.status, j.payload, j.result, j.error_code, j.error_message,
-        j.attempt_count, j.claimed_by, j.created_at, j.updated_at, j.started_at, j.completed_at
+		j.attempt_count, j.claimed_by, j.created_at, j.updated_at, j.started_at, j.completed_at,
+		j.attempt_id::text, j.lease_expires_at, j.next_retry_at
         FROM cloudforge.batches b JOIN cloudforge.batch_images i ON i.batch_id=b.id
         JOIN cloudforge.jobs j ON j.id=i.job_id WHERE b.id=$1 ORDER BY i.position`, id)
 	if err != nil {
@@ -127,7 +129,8 @@ func (s *Store) GetBatch(ctx context.Context, id string) (Batch, error) {
 		j := &entry.Job
 		i := &entry.BatchInput
 		if err := rows.Scan(&batch.ID, &batch.CreatedAt, &i.InputID, &i.OriginalName, &i.Format, &i.Bytes, &i.Width, &i.Height,
-			&j.ID, &j.Type, &j.Status, &j.Payload, &j.Result, &j.ErrorCode, &j.ErrorMessage, &j.AttemptCount, &j.ClaimedBy, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.CompletedAt); err != nil {
+			&j.ID, &j.Type, &j.Status, &j.Payload, &j.Result, &j.ErrorCode, &j.ErrorMessage, &j.AttemptCount, &j.ClaimedBy, &j.CreatedAt, &j.UpdatedAt, &j.StartedAt, &j.CompletedAt,
+			&j.AttemptID, &j.LeaseExpiresAt, &j.NextRetryAt); err != nil {
 			return Batch{}, fmt.Errorf("scan batch: %w", err)
 		}
 		batch.Jobs = append(batch.Jobs, entry)
@@ -151,6 +154,8 @@ func summarizeBatch(batch *Batch) {
 			batch.Queued++
 		case StatusRunning:
 			batch.Running++
+		case StatusRetryWait:
+			batch.RetryWait++
 		case StatusSucceeded:
 			batch.Succeeded++
 			job.OutputURL = "/v1/jobs/" + job.ID + "/thumbnail"
