@@ -1,0 +1,111 @@
+name: CloudForge CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      fault-tests:
+        description: Run real worker-process crashes and an isolated broker interruption
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  GOMAXPROCS: '2'
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Formatting, script safety, JavaScript syntax, build, tests, vet
+        run: ./scripts/test.ps1
+
+  integration:
+    needs: quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      COMPOSE_PROJECT_NAME: cloudforge-ci
+      COMPOSE_FILE: ${{ github.workspace }}/compose.yaml
+      COMPOSE_ENV_FILES: ${{ github.workspace }}/.env.ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Generate ephemeral credentials
+        run: |
+          $adminDatabasePassword = [guid]::NewGuid().ToString('N')
+          $adminBrokerPassword = [guid]::NewGuid().ToString('N')
+          $testDatabasePassword = [guid]::NewGuid().ToString('N')
+          $testBrokerPassword = [guid]::NewGuid().ToString('N')
+          foreach ($value in @($adminDatabasePassword, $adminBrokerPassword, $testDatabasePassword, $testBrokerPassword)) {
+            Write-Output "::add-mask::$value"
+          }
+          @(
+            'POSTGRES_DB=postgres'
+            'POSTGRES_USER=cloudforge_ci_admin'
+            "POSTGRES_PASSWORD=$adminDatabasePassword"
+            'POSTGRES_PORT=5432'
+            'RABBITMQ_DEFAULT_USER=cloudforge_ci_admin'
+            "RABBITMQ_DEFAULT_PASS=$adminBrokerPassword"
+            'RABBITMQ_AMQP_PORT=5672'
+            'RABBITMQ_MANAGEMENT_PORT=15672'
+          ) | Set-Content .env.ci
+          @(
+            "TEST_DATABASE_URL=postgres://cloudforge_test:${testDatabasePassword}@localhost:5432/cloudforge_test?sslmode=disable"
+            "TEST_RABBITMQ_URL=amqp://cloudforge_test:${testBrokerPassword}@localhost:5672/cloudforge_test"
+          ) | Set-Content .env.test
+      - name: Start ephemeral PostgreSQL and RabbitMQ
+        run: |
+          docker compose pull db rabbitmq
+          if ($LASTEXITCODE -ne 0) { throw 'CI image pull failed' }
+          docker compose up -d --wait --wait-timeout 120 --pull never db rabbitmq
+          if ($LASTEXITCODE -ne 0) { throw 'CI infrastructure failed readiness' }
+      - name: Provision restricted test account, database, vhost, and migrations
+        run: ./scripts/setup-test-infrastructure.ps1 -DevelopmentEnvFile .env.ci
+      - name: Sequential real integration tests and vet
+        run: ./scripts/test.ps1 -Integration
+      - name: Opt-in real crash and broker fault tests
+        if: github.event_name == 'workflow_dispatch' && inputs['fault-tests']
+        run: ./scripts/test.ps1 -Integration -Faults -BrokerInterruption
+      - name: Failure diagnostics
+        if: failure()
+        run: docker compose logs --no-color --tail 80
+      - name: Remove this disposable CI project
+        if: always()
+        run: |
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:COMPOSE_PROJECT_NAME -ne 'cloudforge-ci') {
+            throw 'Refusing cleanup outside the disposable GitHub Actions project'
+          }
+          # This is a hosted ephemeral runner; local dev scripts never delete volumes.
+          if (Test-Path .env.ci) {
+            docker compose down --volumes
+            if ($LASTEXITCODE -ne 0) { throw 'Ephemeral CI cleanup failed' }
+          }

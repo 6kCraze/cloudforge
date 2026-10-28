@@ -1,52 +1,518 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#123a35">
-  <title>CloudForge · Image workspace</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1322">
+  <meta name="description" content="Follow the city behind every job. Durable image processing with Go, PostgreSQL and RabbitMQ.">
+  <title>CloudForge — Every job has a path.</title>
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/assets/app.css">
-  <script src="/assets/app.js" defer></script>
+  <link rel="stylesheet" href="/assets/app.css"><script src="/assets/app.js" defer></script>
 </head>
 <body>
-  <aside class="rail">
-    <a class="brand" href="/" aria-label="CloudForge home"><span class="brand-mark">C<span>F</span></span>CloudForge</a>
-    <div class="rail-body"><p class="eyebrow">WORKSPACE</p><div class="nav-current"><span>▧</span> Image processing</div><p class="rail-note">A small batch.<br>A durable workflow.</p></div>
-    <div class="rail-bottom"><span class="dot"></span> Local workspace <span class="version">V5</span></div>
-  </aside>
-  <main>
-    <header class="topbar"><span>Workspace <span class="breadcrumb">/</span> Images</span><span class="operation">PNG thumbnails · 320 × 320</span></header>
-    <section class="intro"><p class="eyebrow">IMAGE WORKSPACE</p><h1>Give your images<br>a smaller footprint.</h1><p>Turn up to four JPEG or PNG images into clean, proportional thumbnails. Keep the detail. Keep the transparency.</p></section>
-    <section class="workspace" aria-label="Image processing workspace">
-      <div class="panel upload-panel">
-        <div class="panel-heading"><div><span class="step">01</span><h2>Your images</h2></div><span id="selection-count" class="pill">0 / 4 selected</span></div>
-        <div id="drop-zone" class="drop-zone">
-          <span class="upload-icon" aria-hidden="true">↥</span><h3>Drop your images here</h3><p>or choose files from your computer</p>
-          <button id="choose" class="secondary" type="button">Choose images <span aria-hidden="true">↗</span></button>
-          <input id="files" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden aria-label="Select JPEG or PNG images">
-          <span class="limits">JPEG / PNG · 5 MiB each · Up to 4 files</span>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="CloudForge home"><span class="brand-mark" aria-hidden="true">CF</span>cloudforge<span class="brand-period">.</span></a>
+    <nav aria-label="Main navigation"><a href="#architecture" class="nav-explore">The architecture</a><a href="#workspace" class="nav-workspace">Launch workspace <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main id="top">
+    <section class="journey" aria-labelledby="hero-title">
+      <div class="story">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="signal-dot"></span> THE CITY BEHIND EVERY JOB</p>
+          <h1 id="hero-title">Every job<br>has a <em>path.</em></h1>
+          <p class="hero-description">Distributed processing built<br class="desktop-break"> to keep work moving.</p>
+          <div class="hero-actions"><a class="primary" href="#workspace">Launch workspace <span aria-hidden="true">↗</span></a><a class="quiet-link" href="#architecture">Explore architecture <span aria-hidden="true">↓</span></a></div>
+          <div class="hero-proof"><span>GO</span><span>POSTGRESQL</span><span>RABBITMQ</span><span>BUILT FOR RECOVERY</span></div>
         </div>
-        <ul id="selected-files" class="selected-files" aria-label="Selected images"></ul>
-        <p id="selection-error" class="error" role="alert" hidden></p>
-        <button id="process" class="primary" type="button" disabled>Process images <span aria-hidden="true">→</span></button>
-        <p class="upload-note">Maximum 8 megapixels and 8,192 px per side.<br>Original files stay untouched. Smaller images are never enlarged.</p>
+        <div id="architecture" class="architecture-copy">
+          <p class="eyebrow">01 / INSIDE THE SYSTEM</p>
+          <h2>A small city.<br>A durable promise.</h2>
+          <p>One upload sets a real distributed system in motion. Each building has a job. PostgreSQL keeps the record.</p>
+          <ol class="flow-story">
+            <li data-chapter="persist"><span>01—02</span><div><h3>Accept. Persist.</h3><p>The API saves your images and records each job with its delivery intent in one database transaction.</p></div></li>
+            <li data-chapter="execute"><span>03—05</span><div><h3>Dispatch. Execute.</h3><p>The dispatcher publishes to RabbitMQ. A Go worker claims the job, renews its lease and makes a thumbnail.</p></div></li>
+            <li data-chapter="recover"><span>↻ / 06</span><div><h3>Recover. Deliver.</h3><p>Expired work gets a bounded retry through the outbox. Only the winning attempt can publish the result you download.</p></div></li>
+          </ol>
+          <a class="quiet-link" href="#workspace">Put the system to work <span aria-hidden="true">↗</span></a>
+        </div>
       </div>
-      <div class="panel results-panel">
-        <div class="panel-heading"><div><span class="step">02</span><h2>Your results</h2></div><span id="batch-state" class="pill">Ready when you are</span></div>
-        <div id="empty-state" class="empty-state"><div class="empty-art" aria-hidden="true"><span>▧</span><span>▧</span></div><h3>Good things come in small sizes.</h3><p>Your batch and finished thumbnails will appear here.<br>Select a few images to get started.</p></div>
-        <div id="batch-view" hidden>
-          <div class="batch-meta"><span id="batch-id"></span><a id="batch-link" href="#">Batch link ↗</a></div>
-          <div class="progress-label"><strong id="progress-text"></strong><button id="poll-control" class="text-button" type="button">Pause updates</button></div>
-          <progress id="progress" max="1" value="0" aria-label="Finished jobs"></progress>
-          <div class="counts" id="counts"></div>
-          <p id="batch-message" class="batch-message" role="status" aria-live="polite"></p>
-          <div id="results" class="results" aria-label="Image results"></div>
+      <div class="city-column">
+        <div class="city-shell" id="city-scene">
+          <div class="scene-heading"><span class="eyebrow">CLOUDFORGE / SYSTEM ATLAS</span><div class="scene-tools"><span class="scene-mode">Illustrative routes</span><button id="motion-control" type="button" aria-pressed="false">Reduce motion</button></div></div>
+          <div class="city-stage"><svg class="city-svg" viewBox="0 0 1100 760" role="img" aria-labelledby="city-title city-desc">
+<title id="city-title">The CloudForge infrastructure city</title>
+<desc id="city-desc">Six isometric buildings represent the API, PostgreSQL, dispatcher, RabbitMQ, workers and output storage. Connections illustrate the architecture, not message traffic. Use the component buttons below to explore.</desc>
+<defs>
+<radialGradient id="ground-light">
+<stop stop-color="#143c51"/>
+<stop offset="1" stop-color="#0b1322"/>
+</radialGradient>
+<filter id="cyan-glow" x="-80%" y="-80%" width="260%" height="260%">
+<feGaussianBlur stdDeviation="4"/>
+</filter>
+</defs>
+<g id="city-camera">
+<ellipse cx="550" cy="405" rx="515" ry="290" fill="url(#ground-light)"/>
+<polygon points="-116.0,385.0 550.0,703.2 550.0,686.2 -116.0,368.0" fill="#1d3448"/>
+<polygon points="1180.0,402.2 550.0,703.2 550.0,686.2 1180.0,385.2" fill="#102338"/>
+<polygon points="514.0,67.0 1180.0,385.2 550.0,686.2 -116.0,368.0" fill="#344e63" class="roof"/>
+<path d="M-116 368 L550 686.2 L1180 385.2" class="roof-edge"/>
+<polygon points="514.0,66.0 1180.0,384.2 550.0,685.2 -116.0,367.0" fill="#101e2d"/>
+<path d="M532,73.60000000000002 L-98,374.6 M532,56.39999999999998 L1198,374.6" class="city-grid"/>
+<path d="M595,103.69999999999999 L-35,404.7 M469,86.5 L1135,404.7" class="city-grid"/>
+<path d="M658,133.8 L28,434.8 M406,116.6 L1072,434.8" class="city-grid"/>
+<path d="M721,163.9 L91,464.9 M343,146.70000000000002 L1009,464.9" class="city-grid"/>
+<path d="M784,194 L154,495 M280,176.8 L946,495" class="city-grid"/>
+<path d="M847,224.1 L217,525.1 M217,206.9 L883,525.1" class="city-grid"/>
+<path d="M910,254.2 L280,555.2 M154,237 L820,555.2" class="city-grid"/>
+<path d="M973,284.3 L343,585.3 M91,267.1 L757,585.3" class="city-grid"/>
+<path d="M1036,314.4 L406,615.4 M28,297.2 L694,615.4" class="city-grid"/>
+<path d="M1099,344.5 L469,645.5 M-35,327.3 L631,645.5" class="city-grid"/>
+<path d="M1162,374.6 L532,675.6 M-98,357.4 L568,675.6" class="city-grid"/>
+<g class="city-routes">
+<path d="M311.5 280.45 L505 188 L590.5 228.85" class="route-glow"/>
+<path d="M311.5 280.45 L505 188 L590.5 228.85" class="route"/>
+<path d="M311.5 280.45 L505 188 L590.5 228.85" class="route-dash"/>
+<path d="M590.5 228.85 L689.5 276.15 L352 437.4" class="route-glow"/>
+<path d="M590.5 228.85 L689.5 276.15 L352 437.4" class="route"/>
+<path d="M590.5 228.85 L689.5 276.15 L352 437.4" class="route-dash"/>
+<path d="M352 437.4 L410.5 465.35 L739 308.4 L838 355.7" class="route-glow"/>
+<path d="M352 437.4 L410.5 465.35 L739 308.4 L838 355.7" class="route"/>
+<path d="M352 437.4 L410.5 465.35 L739 308.4 L838 355.7" class="route-dash"/>
+<path d="M838 355.7 L937 403 L752.5 491.15" class="route-glow"/>
+<path d="M838 355.7 L937 403 L752.5 491.15" class="route"/>
+<path d="M838 355.7 L937 403 L752.5 491.15" class="route-dash"/>
+<path d="M752.5 491.15 L527.5 598.65 L433 553.5" class="route-glow"/>
+<path d="M752.5 491.15 L527.5 598.65 L433 553.5" class="route"/>
+<path d="M752.5 491.15 L527.5 598.65 L433 553.5" class="route-dash"/>
+<path d="M752.5 491.15 L869.5 435.25 L514 265.4 L590.5 228.85" class="route-glow"/>
+<path d="M752.5 491.15 L869.5 435.25 L514 265.4 L590.5 228.85" class="route"/>
+<path d="M752.5 491.15 L869.5 435.25 L514 265.4 L590.5 228.85" class="route-dash"/>
+</g>
+<g class="city-building" data-building="database">
+<ellipse cx="604" cy="237.4" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="492.4,225.4 604.0,278.7 604.0,270.7 492.4,217.4" fill="#1d3448"/>
+<polygon points="715.6,225.4 604.0,278.7 604.0,270.7 715.6,217.4" fill="#102338"/>
+<polygon points="604.0,164.1 715.6,217.4 604.0,270.7 492.4,217.4" fill="#344e63" class="roof"/>
+<path d="M492.4 217.4 L604 270.72 L715.6 217.4" class="roof-edge"/>
+<polygon points="604.0,162.2 717.4,216.4 604.0,270.6 490.6,216.4" class="node-ring"/>
+<g class="building-body">
+<polygon points="514.0,222.4 604.0,265.4 604.0,153.4 514.0,110.4" fill="#1d3448"/>
+<polygon points="694.0,222.4 604.0,265.4 604.0,153.4 694.0,110.4" fill="#102338"/>
+<polygon points="604.0,67.4 694.0,110.4 604.0,153.4 514.0,110.4" fill="#344e63" class="roof"/>
+<path d="M514 110.4 L604 153.39999999999998 L694 110.4" class="roof-edge"/>
+<polygon points="522.6,212.9 528.9,215.9 528.9,209.9 522.6,206.9" fill="#edbd79" class="window"/>
+<polygon points="537.0,219.8 543.3,222.8 543.3,216.8 537.0,213.8" fill="#edbd79" class="window"/>
+<polygon points="551.4,226.6 557.7,229.6 557.7,223.6 551.4,220.6" fill="#4c5657" class="window"/>
+<polygon points="565.8,233.5 572.1,236.5 572.1,230.5 565.8,227.5" fill="#edbd79" class="window"/>
+<polygon points="580.2,240.4 586.5,243.4 586.5,237.4 580.2,234.4" fill="#edbd79" class="window"/>
+<polygon points="594.6,247.3 600.9,250.3 600.9,244.3 594.6,241.3" fill="#4c5657" class="window"/>
+<polygon points="686.3,212.4 680.9,215.0 680.9,209.0 686.3,206.4" fill="#a17f51" class="window"/>
+<polygon points="671.9,219.3 666.5,221.9 666.5,215.9 671.9,213.3" fill="#a17f51" class="window"/>
+<polygon points="657.5,226.2 652.1,228.8 652.1,222.8 657.5,220.2" fill="#a17f51" class="window"/>
+<polygon points="643.1,233.1 637.7,235.7 637.7,229.7 643.1,227.1" fill="#a17f51" class="window"/>
+<polygon points="628.7,240.0 623.3,242.5 623.3,236.5 628.7,234.0" fill="#a17f51" class="window"/>
+<polygon points="614.3,246.8 608.9,249.4 608.9,243.4 614.3,240.8" fill="#a17f51" class="window"/>
+<polygon points="522.6,195.9 528.9,198.9 528.9,192.9 522.6,189.9" fill="#edbd79" class="window"/>
+<polygon points="537.0,202.8 543.3,205.8 543.3,199.8 537.0,196.8" fill="#4c5657" class="window"/>
+<polygon points="551.4,209.6 557.7,212.6 557.7,206.6 551.4,203.6" fill="#edbd79" class="window"/>
+<polygon points="565.8,216.5 572.1,219.5 572.1,213.5 565.8,210.5" fill="#edbd79" class="window"/>
+<polygon points="580.2,223.4 586.5,226.4 586.5,220.4 580.2,217.4" fill="#4c5657" class="window"/>
+<polygon points="594.6,230.3 600.9,233.3 600.9,227.3 594.6,224.3" fill="#edbd79" class="window"/>
+<polygon points="686.3,195.4 680.9,198.0 680.9,192.0 686.3,189.4" fill="#293e4a" class="window"/>
+<polygon points="671.9,202.3 666.5,204.9 666.5,198.9 671.9,196.3" fill="#293e4a" class="window"/>
+<polygon points="657.5,209.2 652.1,211.8 652.1,205.8 657.5,203.2" fill="#293e4a" class="window"/>
+<polygon points="643.1,216.1 637.7,218.7 637.7,212.7 643.1,210.1" fill="#293e4a" class="window"/>
+<polygon points="628.7,223.0 623.3,225.5 623.3,219.5 628.7,217.0" fill="#293e4a" class="window"/>
+<polygon points="614.3,229.8 608.9,232.4 608.9,226.4 614.3,223.8" fill="#293e4a" class="window"/>
+<polygon points="522.6,178.9 528.9,181.9 528.9,175.9 522.6,172.9" fill="#4c5657" class="window"/>
+<polygon points="537.0,185.8 543.3,188.8 543.3,182.8 537.0,179.8" fill="#edbd79" class="window"/>
+<polygon points="551.4,192.6 557.7,195.6 557.7,189.6 551.4,186.6" fill="#edbd79" class="window"/>
+<polygon points="565.8,199.5 572.1,202.5 572.1,196.5 565.8,193.5" fill="#4c5657" class="window"/>
+<polygon points="580.2,206.4 586.5,209.4 586.5,203.4 580.2,200.4" fill="#edbd79" class="window"/>
+<polygon points="594.6,213.3 600.9,216.3 600.9,210.3 594.6,207.3" fill="#edbd79" class="window"/>
+<polygon points="686.3,178.4 680.9,181.0 680.9,175.0 686.3,172.4" fill="#a17f51" class="window"/>
+<polygon points="671.9,185.3 666.5,187.9 666.5,181.9 671.9,179.3" fill="#a17f51" class="window"/>
+<polygon points="657.5,192.2 652.1,194.8 652.1,188.8 657.5,186.2" fill="#a17f51" class="window"/>
+<polygon points="643.1,199.1 637.7,201.7 637.7,195.7 643.1,193.1" fill="#a17f51" class="window"/>
+<polygon points="628.7,206.0 623.3,208.5 623.3,202.5 628.7,200.0" fill="#a17f51" class="window"/>
+<polygon points="614.3,212.8 608.9,215.4 608.9,209.4 614.3,206.8" fill="#a17f51" class="window"/>
+<polygon points="522.6,161.9 528.9,164.9 528.9,158.9 522.6,155.9" fill="#edbd79" class="window"/>
+<polygon points="537.0,168.8 543.3,171.8 543.3,165.8 537.0,162.8" fill="#edbd79" class="window"/>
+<polygon points="551.4,175.6 557.7,178.6 557.7,172.6 551.4,169.6" fill="#4c5657" class="window"/>
+<polygon points="565.8,182.5 572.1,185.5 572.1,179.5 565.8,176.5" fill="#edbd79" class="window"/>
+<polygon points="580.2,189.4 586.5,192.4 586.5,186.4 580.2,183.4" fill="#edbd79" class="window"/>
+<polygon points="594.6,196.3 600.9,199.3 600.9,193.3 594.6,190.3" fill="#4c5657" class="window"/>
+<polygon points="686.3,161.4 680.9,164.0 680.9,158.0 686.3,155.4" fill="#a17f51" class="window"/>
+<polygon points="671.9,168.3 666.5,170.9 666.5,164.9 671.9,162.3" fill="#a17f51" class="window"/>
+<polygon points="657.5,175.2 652.1,177.8 652.1,171.8 657.5,169.2" fill="#a17f51" class="window"/>
+<polygon points="643.1,182.1 637.7,184.7 637.7,178.7 643.1,176.1" fill="#a17f51" class="window"/>
+<polygon points="628.7,189.0 623.3,191.5 623.3,185.5 628.7,183.0" fill="#a17f51" class="window"/>
+<polygon points="614.3,195.8 608.9,198.4 608.9,192.4 614.3,189.8" fill="#a17f51" class="window"/>
+<polygon points="522.6,144.9 528.9,147.9 528.9,141.9 522.6,138.9" fill="#edbd79" class="window"/>
+<polygon points="537.0,151.8 543.3,154.8 543.3,148.8 537.0,145.8" fill="#4c5657" class="window"/>
+<polygon points="551.4,158.6 557.7,161.6 557.7,155.6 551.4,152.6" fill="#edbd79" class="window"/>
+<polygon points="565.8,165.5 572.1,168.5 572.1,162.5 565.8,159.5" fill="#edbd79" class="window"/>
+<polygon points="580.2,172.4 586.5,175.4 586.5,169.4 580.2,166.4" fill="#4c5657" class="window"/>
+<polygon points="594.6,179.3 600.9,182.3 600.9,176.3 594.6,173.3" fill="#edbd79" class="window"/>
+<polygon points="686.3,144.4 680.9,147.0 680.9,141.0 686.3,138.4" fill="#a17f51" class="window"/>
+<polygon points="671.9,151.3 666.5,153.9 666.5,147.9 671.9,145.3" fill="#a17f51" class="window"/>
+<polygon points="657.5,158.2 652.1,160.8 652.1,154.8 657.5,152.2" fill="#a17f51" class="window"/>
+<polygon points="643.1,165.1 637.7,167.7 637.7,161.7 643.1,159.1" fill="#a17f51" class="window"/>
+<polygon points="628.7,172.0 623.3,174.5 623.3,168.5 628.7,166.0" fill="#a17f51" class="window"/>
+<polygon points="614.3,178.8 608.9,181.4 608.9,175.4 614.3,172.8" fill="#a17f51" class="window"/>
+<polygon points="522.6,127.9 528.9,130.9 528.9,124.9 522.6,121.9" fill="#4c5657" class="window"/>
+<polygon points="537.0,134.8 543.3,137.8 543.3,131.8 537.0,128.8" fill="#edbd79" class="window"/>
+<polygon points="551.4,141.6 557.7,144.6 557.7,138.6 551.4,135.6" fill="#edbd79" class="window"/>
+<polygon points="565.8,148.5 572.1,151.5 572.1,145.5 565.8,142.5" fill="#4c5657" class="window"/>
+<polygon points="580.2,155.4 586.5,158.4 586.5,152.4 580.2,149.4" fill="#edbd79" class="window"/>
+<polygon points="594.6,162.3 600.9,165.3 600.9,159.3 594.6,156.3" fill="#edbd79" class="window"/>
+<polygon points="686.3,127.4 680.9,130.0 680.9,124.0 686.3,121.4" fill="#293e4a" class="window"/>
+<polygon points="671.9,134.3 666.5,136.9 666.5,130.9 671.9,128.3" fill="#293e4a" class="window"/>
+<polygon points="657.5,141.2 652.1,143.8 652.1,137.8 657.5,135.2" fill="#293e4a" class="window"/>
+<polygon points="643.1,148.1 637.7,150.7 637.7,144.7 643.1,142.1" fill="#293e4a" class="window"/>
+<polygon points="628.7,155.0 623.3,157.5 623.3,151.5 628.7,149.0" fill="#293e4a" class="window"/>
+<polygon points="614.3,161.8 608.9,164.4 608.9,158.4 614.3,155.8" fill="#293e4a" class="window"/>
+<polygon points="503.2,110.4 604.0,158.6 604.0,148.6 503.2,100.4" fill="#1d3448"/>
+<polygon points="704.8,110.4 604.0,158.6 604.0,148.6 704.8,100.4" fill="#102338"/>
+<polygon points="604.0,52.2 704.8,100.4 604.0,148.6 503.2,100.4" fill="#344e63" class="roof"/>
+<path d="M503.2 100.4 L604 148.56 L704.8 100.4" class="roof-edge"/>
+<polygon points="540.1,100.0 604.9,130.9 604.9,106.9 540.1,76.0" fill="#1d3448"/>
+<polygon points="669.7,100.0 604.9,130.9 604.9,106.9 669.7,76.0" fill="#102338"/>
+<polygon points="604.9,45.0 669.7,76.0 604.9,106.9 540.1,76.0" fill="#344e63" class="roof"/>
+<path d="M540.1 75.97 L604.9 106.93 L669.7 75.97" class="roof-edge"/>
+<polygon points="548.7,90.4 555.0,93.5 555.0,87.5 548.7,84.4" fill="#edbd79" class="window"/>
+<polygon points="563.1,97.3 569.4,100.3 569.4,94.3 563.1,91.3" fill="#edbd79" class="window"/>
+<polygon points="577.5,104.2 583.8,107.2 583.8,101.2 577.5,98.2" fill="#4c5657" class="window"/>
+<polygon points="591.9,111.1 598.2,114.1 598.2,108.1 591.9,105.1" fill="#edbd79" class="window"/>
+<polygon points="662.0,90.0 656.6,92.6 656.6,86.6 662.0,84.0" fill="#a17f51" class="window"/>
+<polygon points="647.6,96.9 642.2,99.5 642.2,93.5 647.6,90.9" fill="#a17f51" class="window"/>
+<polygon points="633.2,103.8 627.8,106.4 627.8,100.4 633.2,97.8" fill="#a17f51" class="window"/>
+<polygon points="618.8,110.7 613.4,113.2 613.4,107.2 618.8,104.7" fill="#a17f51" class="window"/>
+<polygon points="579.7,74.3 608.5,88.0 608.5,80.0 579.7,66.3" fill="#1d3448"/>
+<polygon points="637.3,74.3 608.5,88.0 608.5,80.0 637.3,66.3" fill="#102338"/>
+<polygon points="608.5,52.5 637.3,66.3 608.5,80.0 579.7,66.3" fill="#344e63" class="roof"/>
+<path d="M579.7 66.25 L608.5 80.00999999999999 L637.3 66.25" class="roof-edge"/>
+</g>
+</g>
+<g class="city-building" data-building="api">
+<ellipse cx="316" cy="297.6" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="213.4,281.3 325.0,334.6 325.0,326.6 213.4,273.3" fill="#1d3448"/>
+<polygon points="418.6,289.9 325.0,334.6 325.0,326.6 418.6,281.9" fill="#102338"/>
+<polygon points="307.0,228.6 418.6,281.9 325.0,326.6 213.4,273.3" fill="#344e63" class="roof"/>
+<path d="M213.39999999999998 273.3 L325 326.62 L418.6 281.9" class="roof-edge"/>
+<polygon points="307.0,226.7 420.4,280.9 325.0,326.5 211.6,272.3" class="node-ring"/>
+<g class="building-body">
+<polygon points="235.0,278.3 325.0,321.3 325.0,256.3 235.0,213.3" fill="#1d3448"/>
+<polygon points="397.0,286.9 325.0,321.3 325.0,256.3 397.0,221.9" fill="#102338"/>
+<polygon points="307.0,178.9 397.0,221.9 325.0,256.3 235.0,213.3" fill="#344e63" class="roof"/>
+<path d="M235 213.3 L325 256.3 L397 221.89999999999998" class="roof-edge"/>
+<polygon points="243.6,268.8 249.9,271.8 249.9,265.8 243.6,262.8" fill="#edbd79" class="window"/>
+<polygon points="258.0,275.7 264.3,278.7 264.3,272.7 258.0,269.7" fill="#edbd79" class="window"/>
+<polygon points="272.4,282.5 278.7,285.5 278.7,279.5 272.4,276.5" fill="#4c5657" class="window"/>
+<polygon points="286.8,289.4 293.1,292.4 293.1,286.4 286.8,283.4" fill="#edbd79" class="window"/>
+<polygon points="301.2,296.3 307.5,299.3 307.5,293.3 301.2,290.3" fill="#edbd79" class="window"/>
+<polygon points="315.6,303.2 321.9,306.2 321.9,300.2 315.6,297.2" fill="#4c5657" class="window"/>
+<polygon points="389.3,276.9 383.9,279.5 383.9,273.5 389.3,270.9" fill="#a17f51" class="window"/>
+<polygon points="374.9,283.8 369.5,286.4 369.5,280.4 374.9,277.8" fill="#a17f51" class="window"/>
+<polygon points="360.5,290.7 355.1,293.3 355.1,287.3 360.5,284.7" fill="#a17f51" class="window"/>
+<polygon points="346.1,297.6 340.7,300.2 340.7,294.2 346.1,291.6" fill="#a17f51" class="window"/>
+<polygon points="243.6,251.8 249.9,254.8 249.9,248.8 243.6,245.8" fill="#edbd79" class="window"/>
+<polygon points="258.0,258.7 264.3,261.7 264.3,255.7 258.0,252.7" fill="#4c5657" class="window"/>
+<polygon points="272.4,265.5 278.7,268.5 278.7,262.5 272.4,259.5" fill="#edbd79" class="window"/>
+<polygon points="286.8,272.4 293.1,275.4 293.1,269.4 286.8,266.4" fill="#edbd79" class="window"/>
+<polygon points="301.2,279.3 307.5,282.3 307.5,276.3 301.2,273.3" fill="#4c5657" class="window"/>
+<polygon points="315.6,286.2 321.9,289.2 321.9,283.2 315.6,280.2" fill="#edbd79" class="window"/>
+<polygon points="389.3,259.9 383.9,262.5 383.9,256.5 389.3,253.9" fill="#293e4a" class="window"/>
+<polygon points="374.9,266.8 369.5,269.4 369.5,263.4 374.9,260.8" fill="#293e4a" class="window"/>
+<polygon points="360.5,273.7 355.1,276.3 355.1,270.3 360.5,267.7" fill="#293e4a" class="window"/>
+<polygon points="346.1,280.6 340.7,283.2 340.7,277.2 346.1,274.6" fill="#293e4a" class="window"/>
+<polygon points="243.6,234.8 249.9,237.8 249.9,231.8 243.6,228.8" fill="#4c5657" class="window"/>
+<polygon points="258.0,241.7 264.3,244.7 264.3,238.7 258.0,235.7" fill="#edbd79" class="window"/>
+<polygon points="272.4,248.5 278.7,251.5 278.7,245.5 272.4,242.5" fill="#edbd79" class="window"/>
+<polygon points="286.8,255.4 293.1,258.4 293.1,252.4 286.8,249.4" fill="#4c5657" class="window"/>
+<polygon points="301.2,262.3 307.5,265.3 307.5,259.3 301.2,256.3" fill="#edbd79" class="window"/>
+<polygon points="315.6,269.2 321.9,272.2 321.9,266.2 315.6,263.2" fill="#edbd79" class="window"/>
+<polygon points="389.3,242.9 383.9,245.5 383.9,239.5 389.3,236.9" fill="#a17f51" class="window"/>
+<polygon points="374.9,249.8 369.5,252.4 369.5,246.4 374.9,243.8" fill="#a17f51" class="window"/>
+<polygon points="360.5,256.7 355.1,259.3 355.1,253.3 360.5,250.7" fill="#a17f51" class="window"/>
+<polygon points="346.1,263.6 340.7,266.2 340.7,260.2 346.1,257.6" fill="#a17f51" class="window"/>
+<polygon points="269.2,210.7 328.6,239.1 328.6,221.1 269.2,192.7" fill="#1d3448"/>
+<polygon points="371.8,218.5 328.6,239.1 328.6,221.1 371.8,200.5" fill="#102338"/>
+<polygon points="312.4,172.1 371.8,200.5 328.6,221.1 269.2,192.7" fill="#344e63" class="roof"/>
+<path d="M269.2 192.72000000000003 L328.6 221.10000000000002 L371.79999999999995 200.46000000000004" class="roof-edge"/>
+</g>
+</g>
+<g class="city-building" data-building="broker">
+<ellipse cx="838" cy="368.55" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="730.9,352.3 847.0,407.7 847.0,399.7 730.9,344.3" fill="#1d3448"/>
+<polygon points="945.1,360.9 847.0,407.7 847.0,399.7 945.1,352.9" fill="#102338"/>
+<polygon points="829.0,297.4 945.1,352.9 847.0,399.7 730.9,344.3" fill="#344e63" class="roof"/>
+<path d="M730.9 344.25 L847 399.72 L945.1 352.85" class="roof-edge"/>
+<polygon points="829.0,295.5 946.9,351.9 847.0,399.6 729.1,343.3" class="node-ring"/>
+<g class="building-body">
+<polygon points="752.5,349.3 847.0,394.4 847.0,314.4 752.5,269.3" fill="#1d3448"/>
+<polygon points="923.5,357.9 847.0,394.4 847.0,314.4 923.5,277.9" fill="#102338"/>
+<polygon points="829.0,232.7 923.5,277.9 847.0,314.4 752.5,269.3" fill="#344e63" class="roof"/>
+<path d="M752.5 269.25 L847 314.4 L923.5 277.85" class="roof-edge"/>
+<polygon points="761.1,339.7 767.4,342.7 767.4,336.7 761.1,333.7" fill="#edbd79" class="window"/>
+<polygon points="775.5,346.6 781.8,349.6 781.8,343.6 775.5,340.6" fill="#edbd79" class="window"/>
+<polygon points="789.9,353.5 796.2,356.5 796.2,350.5 789.9,347.5" fill="#4c5657" class="window"/>
+<polygon points="804.3,360.4 810.6,363.4 810.6,357.4 804.3,354.4" fill="#edbd79" class="window"/>
+<polygon points="818.7,367.2 825.0,370.3 825.0,364.3 818.7,361.2" fill="#edbd79" class="window"/>
+<polygon points="833.1,374.1 839.4,377.1 839.4,371.1 833.1,368.1" fill="#4c5657" class="window"/>
+<polygon points="915.8,347.9 910.4,350.5 910.4,344.5 915.8,341.9" fill="#a17f51" class="window"/>
+<polygon points="901.4,354.8 896.0,357.4 896.0,351.4 901.4,348.8" fill="#a17f51" class="window"/>
+<polygon points="887.0,361.7 881.6,364.2 881.6,358.2 887.0,355.7" fill="#a17f51" class="window"/>
+<polygon points="872.6,368.5 867.2,371.1 867.2,365.1 872.6,362.5" fill="#a17f51" class="window"/>
+<polygon points="858.2,375.4 852.8,378.0 852.8,372.0 858.2,369.4" fill="#a17f51" class="window"/>
+<polygon points="761.1,322.7 767.4,325.7 767.4,319.7 761.1,316.7" fill="#edbd79" class="window"/>
+<polygon points="775.5,329.6 781.8,332.6 781.8,326.6 775.5,323.6" fill="#4c5657" class="window"/>
+<polygon points="789.9,336.5 796.2,339.5 796.2,333.5 789.9,330.5" fill="#edbd79" class="window"/>
+<polygon points="804.3,343.4 810.6,346.4 810.6,340.4 804.3,337.4" fill="#edbd79" class="window"/>
+<polygon points="818.7,350.2 825.0,353.3 825.0,347.3 818.7,344.2" fill="#4c5657" class="window"/>
+<polygon points="833.1,357.1 839.4,360.1 839.4,354.1 833.1,351.1" fill="#edbd79" class="window"/>
+<polygon points="915.8,330.9 910.4,333.5 910.4,327.5 915.8,324.9" fill="#293e4a" class="window"/>
+<polygon points="901.4,337.8 896.0,340.4 896.0,334.4 901.4,331.8" fill="#293e4a" class="window"/>
+<polygon points="887.0,344.7 881.6,347.2 881.6,341.2 887.0,338.7" fill="#293e4a" class="window"/>
+<polygon points="872.6,351.5 867.2,354.1 867.2,348.1 872.6,345.5" fill="#293e4a" class="window"/>
+<polygon points="858.2,358.4 852.8,361.0 852.8,355.0 858.2,352.4" fill="#293e4a" class="window"/>
+<polygon points="761.1,305.7 767.4,308.7 767.4,302.7 761.1,299.7" fill="#4c5657" class="window"/>
+<polygon points="775.5,312.6 781.8,315.6 781.8,309.6 775.5,306.6" fill="#edbd79" class="window"/>
+<polygon points="789.9,319.5 796.2,322.5 796.2,316.5 789.9,313.5" fill="#edbd79" class="window"/>
+<polygon points="804.3,326.4 810.6,329.4 810.6,323.4 804.3,320.4" fill="#4c5657" class="window"/>
+<polygon points="818.7,333.2 825.0,336.3 825.0,330.3 818.7,327.2" fill="#edbd79" class="window"/>
+<polygon points="833.1,340.1 839.4,343.1 839.4,337.1 833.1,334.1" fill="#edbd79" class="window"/>
+<polygon points="915.8,313.9 910.4,316.5 910.4,310.5 915.8,307.9" fill="#a17f51" class="window"/>
+<polygon points="901.4,320.8 896.0,323.4 896.0,317.4 901.4,314.8" fill="#a17f51" class="window"/>
+<polygon points="887.0,327.7 881.6,330.2 881.6,324.2 887.0,321.7" fill="#a17f51" class="window"/>
+<polygon points="872.6,334.5 867.2,337.1 867.2,331.1 872.6,328.5" fill="#a17f51" class="window"/>
+<polygon points="858.2,341.4 852.8,344.0 852.8,338.0 858.2,335.4" fill="#a17f51" class="window"/>
+<polygon points="761.1,288.7 767.4,291.7 767.4,285.7 761.1,282.7" fill="#edbd79" class="window"/>
+<polygon points="775.5,295.6 781.8,298.6 781.8,292.6 775.5,289.6" fill="#edbd79" class="window"/>
+<polygon points="789.9,302.5 796.2,305.5 796.2,299.5 789.9,296.5" fill="#4c5657" class="window"/>
+<polygon points="804.3,309.4 810.6,312.4 810.6,306.4 804.3,303.4" fill="#edbd79" class="window"/>
+<polygon points="818.7,316.2 825.0,319.3 825.0,313.3 818.7,310.2" fill="#edbd79" class="window"/>
+<polygon points="833.1,323.1 839.4,326.1 839.4,320.1 833.1,317.1" fill="#4c5657" class="window"/>
+<polygon points="915.8,296.9 910.4,299.5 910.4,293.5 915.8,290.9" fill="#a17f51" class="window"/>
+<polygon points="901.4,303.8 896.0,306.4 896.0,300.4 901.4,297.8" fill="#a17f51" class="window"/>
+<polygon points="887.0,310.7 881.6,313.2 881.6,307.2 887.0,304.7" fill="#a17f51" class="window"/>
+<polygon points="872.6,317.5 867.2,320.1 867.2,314.1 872.6,311.5" fill="#a17f51" class="window"/>
+<polygon points="858.2,324.4 852.8,327.0 852.8,321.0 858.2,318.4" fill="#a17f51" class="window"/>
+<polygon points="789.4,269.7 846.1,296.8 846.1,276.8 789.4,249.7" fill="#1d3448"/>
+<polygon points="886.6,277.4 846.1,296.8 846.1,276.8 886.6,257.4" fill="#102338"/>
+<polygon points="829.9,230.3 886.6,257.4 846.1,276.8 789.4,249.7" fill="#344e63" class="roof"/>
+<path d="M789.4 249.68 L846.1 276.77 L886.6 257.42" class="roof-edge"/>
+<path d="M837.1,252.69 L837.1,217.69 M822.7,224.81 L851.5,238.57" stroke="#7699ad" stroke-width="3"/>
+<circle cx="837.1" cy="217.69" r="4" fill="#37d9ff"/>
+</g>
+</g>
+<g class="city-building" data-building="dispatcher">
+<ellipse cx="352" cy="452.4" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="249.4,436.1 361.0,489.4 361.0,481.4 249.4,428.1" fill="#1d3448"/>
+<polygon points="454.6,444.7 361.0,489.4 361.0,481.4 454.6,436.7" fill="#102338"/>
+<polygon points="343.0,383.4 454.6,436.7 361.0,481.4 249.4,428.1" fill="#344e63" class="roof"/>
+<path d="M249.39999999999998 428.1 L361 481.42 L454.6 436.7" class="roof-edge"/>
+<polygon points="343.0,381.5 456.4,435.7 361.0,481.3 247.6,427.1" class="node-ring"/>
+<g class="building-body">
+<polygon points="271.0,433.1 308.8,451.2 308.8,379.2 271.0,361.1" fill="#1d3448"/>
+<polygon points="380.8,416.8 308.8,451.2 308.8,379.2 380.8,344.8" fill="#102338"/>
+<polygon points="343.0,326.7 380.8,344.8 308.8,379.2 271.0,361.1" fill="#344e63" class="roof"/>
+<path d="M271 361.1 L308.79999999999995 379.15999999999997 L380.79999999999995 344.76" class="roof-edge"/>
+<polygon points="279.6,423.6 285.9,426.6 285.9,420.6 279.6,417.6" fill="#edbd79" class="window"/>
+<polygon points="294.0,430.5 300.3,433.5 300.3,427.5 294.0,424.5" fill="#edbd79" class="window"/>
+<polygon points="373.1,406.8 367.7,409.4 367.7,403.4 373.1,400.8" fill="#a17f51" class="window"/>
+<polygon points="358.7,413.7 353.3,416.3 353.3,410.3 358.7,407.7" fill="#a17f51" class="window"/>
+<polygon points="344.3,420.6 338.9,423.1 338.9,417.1 344.3,414.6" fill="#a17f51" class="window"/>
+<polygon points="329.9,427.4 324.5,430.0 324.5,424.0 329.9,421.4" fill="#a17f51" class="window"/>
+<polygon points="279.6,406.6 285.9,409.6 285.9,403.6 279.6,400.6" fill="#edbd79" class="window"/>
+<polygon points="294.0,413.5 300.3,416.5 300.3,410.5 294.0,407.5" fill="#4c5657" class="window"/>
+<polygon points="373.1,389.8 367.7,392.4 367.7,386.4 373.1,383.8" fill="#293e4a" class="window"/>
+<polygon points="358.7,396.7 353.3,399.3 353.3,393.3 358.7,390.7" fill="#293e4a" class="window"/>
+<polygon points="344.3,403.6 338.9,406.1 338.9,400.1 344.3,397.6" fill="#293e4a" class="window"/>
+<polygon points="329.9,410.4 324.5,413.0 324.5,407.0 329.9,404.4" fill="#293e4a" class="window"/>
+<polygon points="279.6,389.6 285.9,392.6 285.9,386.6 279.6,383.6" fill="#4c5657" class="window"/>
+<polygon points="294.0,396.5 300.3,399.5 300.3,393.5 294.0,390.5" fill="#edbd79" class="window"/>
+<polygon points="373.1,372.8 367.7,375.4 367.7,369.4 373.1,366.8" fill="#a17f51" class="window"/>
+<polygon points="358.7,379.7 353.3,382.3 353.3,376.3 358.7,373.7" fill="#a17f51" class="window"/>
+<polygon points="344.3,386.6 338.9,389.1 338.9,383.1 344.3,380.6" fill="#a17f51" class="window"/>
+<polygon points="329.9,393.4 324.5,396.0 324.5,390.0 329.9,387.4" fill="#a17f51" class="window"/>
+<polygon points="316.0,454.6 353.8,472.7 353.8,419.7 316.0,401.6" fill="#1d3448"/>
+<polygon points="425.8,438.3 353.8,472.7 353.8,419.7 425.8,385.3" fill="#102338"/>
+<polygon points="388.0,367.2 425.8,385.3 353.8,419.7 316.0,401.6" fill="#344e63" class="roof"/>
+<path d="M316 401.6 L353.79999999999995 419.65999999999997 L425.8 385.26" class="roof-edge"/>
+<polygon points="324.6,445.1 330.9,448.1 330.9,442.1 324.6,439.1" fill="#edbd79" class="window"/>
+<polygon points="339.0,452.0 345.3,455.0 345.3,449.0 339.0,446.0" fill="#edbd79" class="window"/>
+<polygon points="418.1,428.3 412.7,430.9 412.7,424.9 418.1,422.3" fill="#a17f51" class="window"/>
+<polygon points="403.7,435.2 398.3,437.8 398.3,431.8 403.7,429.2" fill="#a17f51" class="window"/>
+<polygon points="389.3,442.1 383.9,444.6 383.9,438.6 389.3,436.1" fill="#a17f51" class="window"/>
+<polygon points="374.9,448.9 369.5,451.5 369.5,445.5 374.9,442.9" fill="#a17f51" class="window"/>
+<polygon points="324.6,428.1 330.9,431.1 330.9,425.1 324.6,422.1" fill="#edbd79" class="window"/>
+<polygon points="339.0,435.0 345.3,438.0 345.3,432.0 339.0,429.0" fill="#4c5657" class="window"/>
+<polygon points="418.1,411.3 412.7,413.9 412.7,407.9 418.1,405.3" fill="#293e4a" class="window"/>
+<polygon points="403.7,418.2 398.3,420.8 398.3,414.8 403.7,412.2" fill="#293e4a" class="window"/>
+<polygon points="389.3,425.1 383.9,427.6 383.9,421.6 389.3,419.1" fill="#293e4a" class="window"/>
+<polygon points="374.9,431.9 369.5,434.5 369.5,428.5 374.9,425.9" fill="#293e4a" class="window"/>
+<polygon points="325.0,400.8 362.8,418.9 362.8,404.9 325.0,386.8" fill="#1d3448"/>
+<polygon points="385.3,408.1 362.8,418.9 362.8,404.9 385.3,394.1" fill="#102338"/>
+<polygon points="347.5,376.1 385.3,394.1 362.8,404.9 325.0,386.8" fill="#344e63" class="roof"/>
+<path d="M325 386.8 L362.79999999999995 404.86 L385.29999999999995 394.11" class="roof-edge"/>
+</g>
+</g>
+<g class="city-building" data-building="workers">
+<ellipse cx="743.95" cy="512.815" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="622.9,498.4 748.9,558.6 748.9,550.6 622.9,490.4" fill="#1d3448"/>
+<polygon points="865.0,503.2 748.9,558.6 748.9,550.6 865.0,495.2" fill="#102338"/>
+<polygon points="739.0,435.0 865.0,495.2 748.9,550.6 622.9,490.4" fill="#344e63" class="roof"/>
+<path d="M622.9 490.45 L748.9 550.65 L865 495.18" class="roof-edge"/>
+<polygon points="739.0,433.1 866.8,494.2 748.9,550.5 621.1,489.4" class="node-ring"/>
+<g class="building-body">
+<polygon points="644.5,495.4 673.3,509.2 673.3,456.2 644.5,442.4" fill="#1d3448"/>
+<polygon points="767.8,464.1 673.3,509.2 673.3,456.2 767.8,411.1" fill="#102338"/>
+<polygon points="739.0,397.3 767.8,411.1 673.3,456.2 644.5,442.4" fill="#344e63" class="roof"/>
+<path d="M644.5 442.45 L673.3 456.21000000000004 L767.8 411.06" class="roof-edge"/>
+<polygon points="653.1,485.9 659.4,488.9 659.4,482.9 653.1,479.9" fill="#edbd79" class="window"/>
+<polygon points="760.1,454.1 754.7,456.7 754.7,450.7 760.1,448.1" fill="#a17f51" class="window"/>
+<polygon points="745.7,461.0 740.3,463.6 740.3,457.6 745.7,455.0" fill="#a17f51" class="window"/>
+<polygon points="731.3,467.9 725.9,470.4 725.9,464.4 731.3,461.9" fill="#a17f51" class="window"/>
+<polygon points="716.9,474.7 711.5,477.3 711.5,471.3 716.9,468.7" fill="#a17f51" class="window"/>
+<polygon points="702.5,481.6 697.1,484.2 697.1,478.2 702.5,475.6" fill="#a17f51" class="window"/>
+<polygon points="688.1,488.5 682.7,491.1 682.7,485.1 688.1,482.5" fill="#a17f51" class="window"/>
+<polygon points="653.1,468.9 659.4,471.9 659.4,465.9 653.1,462.9" fill="#edbd79" class="window"/>
+<polygon points="760.1,437.1 754.7,439.7 754.7,433.7 760.1,431.1" fill="#293e4a" class="window"/>
+<polygon points="745.7,444.0 740.3,446.6 740.3,440.6 745.7,438.0" fill="#293e4a" class="window"/>
+<polygon points="731.3,450.9 725.9,453.4 725.9,447.4 731.3,444.9" fill="#293e4a" class="window"/>
+<polygon points="716.9,457.7 711.5,460.3 711.5,454.3 716.9,451.7" fill="#293e4a" class="window"/>
+<polygon points="702.5,464.6 697.1,467.2 697.1,461.2 702.5,458.6" fill="#293e4a" class="window"/>
+<polygon points="688.1,471.5 682.7,474.1 682.7,468.1 688.1,465.5" fill="#293e4a" class="window"/>
+<polygon points="682.3,513.5 711.1,527.3 711.1,474.3 682.3,460.5" fill="#1d3448"/>
+<polygon points="805.6,482.1 711.1,527.3 711.1,474.3 805.6,429.1" fill="#102338"/>
+<polygon points="776.8,415.4 805.6,429.1 711.1,474.3 682.3,460.5" fill="#344e63" class="roof"/>
+<path d="M682.3 460.51 L711.1 474.27 L805.6 429.12" class="roof-edge"/>
+<polygon points="690.9,504.0 697.2,507.0 697.2,501.0 690.9,498.0" fill="#edbd79" class="window"/>
+<polygon points="797.9,472.2 792.5,474.7 792.5,468.7 797.9,466.2" fill="#a17f51" class="window"/>
+<polygon points="783.5,479.0 778.1,481.6 778.1,475.6 783.5,473.0" fill="#a17f51" class="window"/>
+<polygon points="769.1,485.9 763.7,488.5 763.7,482.5 769.1,479.9" fill="#a17f51" class="window"/>
+<polygon points="754.7,492.8 749.3,495.4 749.3,489.4 754.7,486.8" fill="#a17f51" class="window"/>
+<polygon points="740.3,499.7 734.9,502.3 734.9,496.3 740.3,493.7" fill="#a17f51" class="window"/>
+<polygon points="725.9,506.6 720.5,509.1 720.5,503.1 725.9,500.6" fill="#a17f51" class="window"/>
+<polygon points="690.9,487.0 697.2,490.0 697.2,484.0 690.9,481.0" fill="#edbd79" class="window"/>
+<polygon points="797.9,455.2 792.5,457.7 792.5,451.7 797.9,449.2" fill="#293e4a" class="window"/>
+<polygon points="783.5,462.0 778.1,464.6 778.1,458.6 783.5,456.0" fill="#293e4a" class="window"/>
+<polygon points="769.1,468.9 763.7,471.5 763.7,465.5 769.1,462.9" fill="#293e4a" class="window"/>
+<polygon points="754.7,475.8 749.3,478.4 749.3,472.4 754.7,469.8" fill="#293e4a" class="window"/>
+<polygon points="740.3,482.7 734.9,485.3 734.9,479.3 740.3,476.7" fill="#293e4a" class="window"/>
+<polygon points="725.9,489.6 720.5,492.1 720.5,486.1 725.9,483.6" fill="#293e4a" class="window"/>
+<polygon points="720.1,531.6 748.9,545.3 748.9,492.3 720.1,478.6" fill="#1d3448"/>
+<polygon points="843.4,500.2 748.9,545.3 748.9,492.3 843.4,447.2" fill="#102338"/>
+<polygon points="814.6,433.4 843.4,447.2 748.9,492.3 720.1,478.6" fill="#344e63" class="roof"/>
+<path d="M720.1 478.56999999999994 L748.9 492.3299999999999 L843.4000000000001 447.18" class="roof-edge"/>
+<polygon points="728.7,522.0 735.0,525.1 735.0,519.1 728.7,516.0" fill="#edbd79" class="window"/>
+<polygon points="835.7,490.2 830.3,492.8 830.3,486.8 835.7,484.2" fill="#a17f51" class="window"/>
+<polygon points="821.3,497.1 815.9,499.7 815.9,493.7 821.3,491.1" fill="#a17f51" class="window"/>
+<polygon points="806.9,504.0 801.5,506.6 801.5,500.6 806.9,498.0" fill="#a17f51" class="window"/>
+<polygon points="792.5,510.9 787.1,513.4 787.1,507.4 792.5,504.9" fill="#a17f51" class="window"/>
+<polygon points="778.1,517.7 772.7,520.3 772.7,514.3 778.1,511.7" fill="#a17f51" class="window"/>
+<polygon points="763.7,524.6 758.3,527.2 758.3,521.2 763.7,518.6" fill="#a17f51" class="window"/>
+<polygon points="728.7,505.0 735.0,508.1 735.0,502.1 728.7,499.0" fill="#edbd79" class="window"/>
+<polygon points="835.7,473.2 830.3,475.8 830.3,469.8 835.7,467.2" fill="#293e4a" class="window"/>
+<polygon points="821.3,480.1 815.9,482.7 815.9,476.7 821.3,474.1" fill="#293e4a" class="window"/>
+<polygon points="806.9,487.0 801.5,489.6 801.5,483.6 806.9,481.0" fill="#293e4a" class="window"/>
+<polygon points="792.5,493.9 787.1,496.4 787.1,490.4 792.5,487.9" fill="#293e4a" class="window"/>
+<polygon points="778.1,500.7 772.7,503.3 772.7,497.3 778.1,494.7" fill="#293e4a" class="window"/>
+<polygon points="763.7,507.6 758.3,510.2 758.3,504.2 763.7,501.6" fill="#293e4a" class="window"/>
+</g>
+</g>
+<g class="city-building" data-building="storage">
+<ellipse cx="433" cy="568.5" rx="85" ry="35" fill="#020710" opacity=".65"/>
+<polygon points="321.4,547.9 451.0,609.8 451.0,601.8 321.4,539.9" fill="#1d3448"/>
+<polygon points="544.6,565.1 451.0,609.8 451.0,601.8 544.6,557.1" fill="#102338"/>
+<polygon points="415.0,495.2 544.6,557.1 451.0,601.8 321.4,539.9" fill="#344e63" class="roof"/>
+<path d="M321.4 539.9 L451 601.8199999999999 L544.6 557.1" class="roof-edge"/>
+<polygon points="415.0,493.3 546.4,556.1 451.0,601.7 319.6,538.9" class="node-ring"/>
+<g class="building-body">
+<polygon points="343.0,544.9 451.0,596.5 451.0,541.5 343.0,489.9" fill="#1d3448"/>
+<polygon points="523.0,562.1 451.0,596.5 451.0,541.5 523.0,507.1" fill="#102338"/>
+<polygon points="415.0,455.5 523.0,507.1 451.0,541.5 343.0,489.9" fill="#344e63" class="roof"/>
+<path d="M343 489.9 L451 541.5 L523 507.1" class="roof-edge"/>
+<polygon points="351.6,535.4 357.9,538.4 357.9,532.4 351.6,529.4" fill="#edbd79" class="window"/>
+<polygon points="366.0,542.3 372.3,545.3 372.3,539.3 366.0,536.3" fill="#edbd79" class="window"/>
+<polygon points="380.4,549.1 386.7,552.1 386.7,546.1 380.4,543.1" fill="#4c5657" class="window"/>
+<polygon points="394.8,556.0 401.1,559.0 401.1,553.0 394.8,550.0" fill="#edbd79" class="window"/>
+<polygon points="409.2,562.9 415.5,565.9 415.5,559.9 409.2,556.9" fill="#edbd79" class="window"/>
+<polygon points="423.6,569.8 429.9,572.8 429.9,566.8 423.6,563.8" fill="#4c5657" class="window"/>
+<polygon points="438.0,576.7 444.3,579.7 444.3,573.7 438.0,570.7" fill="#edbd79" class="window"/>
+<polygon points="515.3,552.1 509.9,554.7 509.9,548.7 515.3,546.1" fill="#a17f51" class="window"/>
+<polygon points="500.9,559.0 495.5,561.6 495.5,555.6 500.9,553.0" fill="#a17f51" class="window"/>
+<polygon points="486.5,565.9 481.1,568.5 481.1,562.5 486.5,559.9" fill="#a17f51" class="window"/>
+<polygon points="472.1,572.8 466.7,575.4 466.7,569.4 472.1,566.8" fill="#a17f51" class="window"/>
+<polygon points="351.6,518.4 357.9,521.4 357.9,515.4 351.6,512.4" fill="#edbd79" class="window"/>
+<polygon points="366.0,525.3 372.3,528.3 372.3,522.3 366.0,519.3" fill="#4c5657" class="window"/>
+<polygon points="380.4,532.1 386.7,535.1 386.7,529.1 380.4,526.1" fill="#edbd79" class="window"/>
+<polygon points="394.8,539.0 401.1,542.0 401.1,536.0 394.8,533.0" fill="#edbd79" class="window"/>
+<polygon points="409.2,545.9 415.5,548.9 415.5,542.9 409.2,539.9" fill="#4c5657" class="window"/>
+<polygon points="423.6,552.8 429.9,555.8 429.9,549.8 423.6,546.8" fill="#edbd79" class="window"/>
+<polygon points="438.0,559.7 444.3,562.7 444.3,556.7 438.0,553.7" fill="#edbd79" class="window"/>
+<polygon points="515.3,535.1 509.9,537.7 509.9,531.7 515.3,529.1" fill="#293e4a" class="window"/>
+<polygon points="500.9,542.0 495.5,544.6 495.5,538.6 500.9,536.0" fill="#293e4a" class="window"/>
+<polygon points="486.5,548.9 481.1,551.5 481.1,545.5 486.5,542.9" fill="#293e4a" class="window"/>
+<polygon points="472.1,555.8 466.7,558.4 466.7,552.4 472.1,549.8" fill="#293e4a" class="window"/>
+<polygon points="367.3,491.2 448.3,529.9 448.3,520.9 367.3,482.2" fill="#1d3448"/>
+<polygon points="498.7,505.8 448.3,529.9 448.3,520.9 498.7,496.8" fill="#102338"/>
+<polygon points="417.7,458.1 498.7,496.8 448.3,520.9 367.3,482.2" fill="#344e63" class="roof"/>
+<path d="M367.29999999999995 482.19000000000005 L448.3 520.89 L498.7 496.80999999999995" class="roof-edge"/>
+</g>
+</g>
+<text x="604" y="307.9" class="city-label">
+<tspan class="city-number">02</tspan> POSTGRESQL</text>
+<text x="316" y="351.85" class="city-label">
+<tspan class="city-number">01</tspan> API / INTAKE</text>
+<text x="838" y="426.55" class="city-label">
+<tspan class="city-number">04</tspan> RABBITMQ</text>
+<text x="352" y="508.4" class="city-label">
+<tspan class="city-number">03</tspan> DISPATCHER</text>
+<text x="743.95" y="564.565" class="city-label">
+<tspan class="city-number">05</tspan> GO WORKERS</text>
+<text x="433" y="620.25" class="city-label">
+<tspan class="city-number">06</tspan> OUTPUT VAULT</text>
+<g class="street-details" fill="#b9f36b">
+<circle cx="334" cy="192.6" r="2"/>
+<circle cx="703" cy="575.3" r="2"/>
+<circle cx="109" cy="368.9" r="2"/>
+<circle cx="802" cy="227" r="2"/>
+</g>
+</g>
+</svg><div class="scene-coordinate">CF—01<br>LOCAL INFRASTRUCTURE</div><div class="scene-caption"><span class="signal-dot"></span> Select a building to explore</div></div>
+          <div class="component-nav" role="group" aria-label="Explore system components">
+            <button type="button" data-component="api" aria-pressed="true">01 <span>Intake</span></button><button type="button" data-component="database" aria-pressed="false">02 <span>State</span></button><button type="button" data-component="dispatcher" aria-pressed="false">03 <span>Dispatch</span></button><button type="button" data-component="broker" aria-pressed="false">04 <span>Broker</span></button><button type="button" data-component="workers" aria-pressed="false">05 <span>Workers</span></button><button type="button" data-component="storage" aria-pressed="false">06 <span>Outputs</span></button>
+          </div>
+          <div class="component-detail" aria-live="polite"><div><span id="component-kind" class="eyebrow">ACCEPT / GO API</span><h3 id="component-title">The front door.</h3></div><p id="component-description">Validates JPEG and PNG uploads, stores the originals, and creates durable image jobs. An accepted response means your batch was saved.</p></div>
+          <div class="scene-observation"><span id="scene-status" class="observation-label">ARCHITECTURE VIEW</span><p id="scene-observation">Upload or open a batch to connect this map to saved job states. Routes are illustrative, never live message telemetry.</p></div>
         </div>
-        <p id="api-error" class="error" role="alert" hidden></p>
       </div>
     </section>
-    <footer><span>Made for the work between upload and download.</span><span>Asynchronous processing · Real job states</span></footer>
+    <section id="workspace" class="workspace-section" aria-labelledby="workspace-title" tabindex="-1">
+      <div class="workspace-heading"><div><p class="eyebrow"><span class="signal-dot"></span> 02 / THE WORKSPACE</p><h2 id="workspace-title">Small images.<br><span>Serious engineering.</span></h2></div><p>Drop in a few images. Follow their saved states.<br>Take the finished thumbnails with you.</p></div>
+      <div class="workspace">
+        <div class="panel upload-panel">
+          <div class="panel-heading"><div><span class="step">01 / INTAKE</span><h3>Your images</h3></div><span id="selection-count" class="pill">0 / 4 selected</span></div>
+          <div id="drop-zone" class="drop-zone"><span class="upload-icon" aria-hidden="true">↥</span><h4>Drop a little work<br>into the system.</h4><p>JPEG or PNG. Up to four at a time.</p><button id="choose" class="secondary" type="button">Choose images <span aria-hidden="true">＋</span></button><input id="files" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple hidden aria-label="Select JPEG or PNG images"><span class="limits">5 MiB each · 8 megapixels · 8,192 px per side</span></div>
+          <ul id="selected-files" class="selected-files" aria-label="Selected images"></ul><p id="selection-error" class="error" role="alert" hidden></p>
+          <button id="process" class="primary" type="button" disabled>Process images <span aria-hidden="true">↗</span></button><p class="upload-note">Proportional PNG thumbnails, up to 320 × 320.<br>Transparency stays. Smaller images are never enlarged.</p>
+          <div class="reliability-note"><span aria-hidden="true">◇</span><p>Durable by design.<br><span>Saved state. Leased workers. Bounded retries.</span></p></div>
+        </div>
+        <div class="panel results-panel">
+          <div class="panel-heading"><div><span class="step">02 / DELIVERY</span><h3>Your results</h3></div><span id="batch-state" class="pill">Ready when you are</span></div>
+          <div id="empty-state" class="empty-state"><div class="empty-art" aria-hidden="true"><span>↗</span></div><p class="eyebrow">NOTHING IN FLIGHT. YET.</p><h4>Big systems.<br>Small beginnings.</h4><p>Your batch, job states and finished thumbnails<br>will appear here.</p></div>
+          <div id="batch-view" hidden>
+            <div class="batch-meta"><span id="batch-id"></span><a id="batch-link" href="#">Saved batch ↗</a></div><div class="progress-label"><strong id="progress-text"></strong><button id="poll-control" class="text-button" type="button">Pause updates</button></div><progress id="progress" max="1" value="0" aria-label="Finished jobs"></progress><div class="counts" id="counts"></div><p id="batch-message" class="batch-message" role="status" aria-live="polite"></p><p id="snapshot-time" class="snapshot-time"></p><div id="results" class="results" aria-label="Image results"></div>
+          </div><p id="api-error" class="error" role="alert" hidden></p><button id="retry-load" type="button" class="secondary" hidden>Try loading batch again</button>
+        </div>
+      </div>
+      <div class="workspace-footnote"><span>POSTGRESQL IS THE SOURCE OF TRUTH.</span><span>RabbitMQ delivers work. The database records what happened.</span></div>
+    </section>
   </main>
+  <footer class="site-footer"><a class="brand" href="#top">cloudforge<span class="brand-period">.</span></a><span>Every job deserves a way forward.</span><a href="#architecture">Explore the system ↑</a></footer>
+  <noscript><div class="no-script">Enable JavaScript to upload images and inspect saved batches. The architecture above remains available as a static illustration.</div></noscript>
 </body>
 </html>

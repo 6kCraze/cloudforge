@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-labelledby="title desc">
+  <title id="title">CloudForge: durable state, reliable delivery</title>
+  <desc id="desc">Browser to API to PostgreSQL jobs and outbox, dispatcher to RabbitMQ to workers to local outputs. Workers claim and heartbeat against PostgreSQL and commit results with an attempt fence. The dispatcher's recovery loop moves expired work to retry wait and atomically requeues due jobs with a fresh outbox event.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#55d4df"/></marker>
+    <marker id="state" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#b9ed79"/></marker>
+    <style>text{font-family:system-ui,-apple-system,Segoe UI,sans-serif;fill:#edf4fb} .k{font-size:11px;letter-spacing:2px;fill:#82a2b5}.h{font-size:21px;font-weight:650}.b{font-size:13px;fill:#b9cbd8}.small{font-size:12px;fill:#b9cbd8}.flow{fill:none;stroke:#55d4df;stroke-width:2;marker-end:url(#arrow)}.state{fill:none;stroke:#b9ed79;stroke-width:2;stroke-dasharray:6 5;marker-end:url(#state)}.box{fill:#122235;stroke:#39556b;stroke-width:1.5}</style>
+  </defs>
+  <rect width="1200" height="700" rx="20" fill="#091321"/>
+  <text x="42" y="45" class="k">CLOUDFORGE / SYSTEM DESIGN</text>
+  <text x="42" y="83" font-size="30" font-weight="650">Durable state. Recoverable work.</text>
+  <path class="flow" d="M197 194H242"/><path class="flow" d="M412 194H457"/><path class="flow" d="M693 194H738"/><path class="flow" d="M936 194H981"/>
+  <rect x="42" y="144" width="155" height="103" rx="12" class="box"/><text x="60" y="176" class="k">01 / INTERFACE</text><text x="60" y="205" class="h">Browser</text><text x="60" y="228" class="b">Batch upload + status</text>
+  <rect x="242" y="144" width="170" height="103" rx="12" class="box"/><text x="260" y="176" class="k">02 / ACCEPT</text><text x="260" y="205" class="h">Go API</text><text x="260" y="228" class="b">Validate + save inputs</text>
+  <rect x="457" y="130" width="236" height="131" rx="12" fill="#152c2c" stroke="#b9ed79" stroke-width="1.5"/><text x="475" y="160" class="k">03 / SOURCE OF TRUTH</text><text x="475" y="190" class="h">PostgreSQL</text><text x="475" y="215" class="b">jobs + attempts + batches</text><text x="475" y="239" class="b">jobs + outbox: one transaction</text>
+  <rect x="738" y="144" width="198" height="103" rx="12" class="box"/><text x="756" y="176" class="k">04 / PUBLISH</text><text x="756" y="205" class="h">Dispatcher</text><text x="756" y="228" class="b">Sequential outbox batches</text>
+  <rect x="981" y="144" width="177" height="103" rx="12" class="box"/><text x="999" y="176" class="k">05 / DELIVERY</text><text x="999" y="205" class="h">RabbitMQ</text><text x="999" y="228" class="b">Durable queue</text>
+  <text x="753" y="282" class="small">Confirm + mandatory route</text><text x="753" y="302" class="small">then mark outbox published</text>
+  <path class="flow" d="M1069 247V364"/><text x="1082" y="319" class="small">job.ready</text>
+  <rect x="965" y="364" width="193" height="111" rx="12" class="box"/><text x="983" y="396" class="k">06 / EXECUTE</text><text x="983" y="425" class="h">Go workers</text><text x="983" y="450" class="b">Manual ACK · prefetch 1</text>
+  <path class="flow" d="M965 420H866"/>
+  <rect x="651" y="364" width="215" height="111" rx="12" class="box"/><text x="669" y="396" class="k">07 / FILES</text><text x="669" y="425" class="h">Local outputs</text><text x="669" y="450" class="b">job / attempt / thumbnail</text>
+  <path class="state" d="M1010 364V329H575V261"/><text x="583" y="321" class="small">Atomic claim · heartbeat · fenced result commit</text>
+  <path class="state" d="M738 215H718V275H660V261"/>
+  <rect x="42" y="364" width="544" height="166" rx="12" fill="#102229" stroke="#39556b"/>
+  <text x="62" y="394" class="k">RECOVERY LOOP / INSIDE DISPATCHER</text>
+  <text x="62" y="425" font-size="17" font-weight="600">Expired lease → retry_wait (or failed at attempt 3)</text>
+  <text x="62" y="455" class="b">PostgreSQL clock + SKIP LOCKED; attempt history records the decision.</text>
+  <text x="62" y="485" font-size="17" font-weight="600">Due retry → queued + fresh outbox event</text>
+  <text x="62" y="511" class="b">One database transaction. Normal dispatcher publishes it again.</text>
+  <path class="state" d="M314 364V289H499V261"/>
+  <text x="651" y="510" class="b">Only the PostgreSQL-accepted attempt is downloadable.</text>
+  <text x="651" y="534" class="b">Browser downloads through the API; no direct storage access.</text>
+  <path class="flow" d="M42 584H82"/><text x="94" y="589" class="b">Work / file flow</text><path class="state" d="M282 584H322"/><text x="334" y="589" class="b">Database ownership / recovery</text>
+  <path d="M42 615H1158" stroke="#263c50"/>
+  <text x="42" y="645" class="b">At-least-once delivery. Duplicate execution may occur; stale attempts cannot commit the winning result.</text>
+  <text x="42" y="670" class="small">Single-machine development: local Go processes; PostgreSQL and RabbitMQ in Docker. Routes describe design, not live telemetry.</text>
+</svg>

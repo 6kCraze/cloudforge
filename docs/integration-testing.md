@@ -7,15 +7,14 @@ The allowed targets are the local database **cloudforge_test**, PostgreSQL role 
 Use the existing PostgreSQL and RabbitMQ containers and volumes. No additional database or broker containers are needed. Run this setup from the repository root:
 
 ```powershell
-docker compose up -d --wait --pull never db rabbitmq
-Copy-Item .env.test.example .env.test  # first time only; do not overwrite a configured file
+.\scripts\dev.ps1 infra
 .\scripts\setup-test-infrastructure.ps1
-. .\scripts\load-test-env.ps1
-go test -p 1 ./internal/testenv
-go test -p 1 -tags=integration ./internal/system -run '^TestV3TwoWorkersShareQueueSafely$' -count=1 -v -timeout=60s
+.\scripts\test.ps1 -Integration
 ```
 
-`.env.test` is ignored by Git; `.env.test.example` contains only local test credentials. The setup script provisions the separate database and vhost, gives the test role no superuser/create-role/create-database privileges, and gives the broker user permissions only in the test vhost with no management tags. It migrates only the test database and restores the caller's `DATABASE_URL`. Provisioning uses the existing development PostgreSQL admin identity; it never truncates development tables. In a customized installation, verify that the test account has no preexisting grants in development namespaces.
+`.env.test` is ignored by Git; `.env.test.example` contains local placeholders. The setup script generates only a missing `.env.test` with fresh test credentials and preserves an existing configuration. It provisions the separate database and vhost, gives the test role no superuser/create-role/create-database privileges, and gives the broker user permissions only in the test vhost with no management tags. It migrates only the test database and restores the caller's `DATABASE_URL`. Provisioning uses the existing development PostgreSQL admin identity; it never truncates development tables. In a customized installation, verify that the test account has no preexisting grants in development namespaces.
+
+Stop application processes first. The test runner refuses an owned active dev session, clears interactive/browser/broker-fault opt-ins for normal runs, and keeps the existing test-target checks. Ordinary checks retain real transaction, messaging, two-worker, image, lease, retry, and recovery coverage. The two real killed-process cases are opt-in through `test.ps1 -Integration -Faults`. Adding `-BrokerInterruption` explicitly enables the guarded live broker-stop case and restores the caller's environment afterward. Prefer the [manual CI fault option](ci.md) for expensive fault runs.
 
 Tests truncate `cloudforge.jobs` and `cloudforge.outbox_events` only inside the test database. Broker fixtures declare/purge the same queue name, `cloudforge.jobs.v1`, **inside the test vhost**. The development queue in `/` is independent. An advisory lock serializes fixtures sharing this test namespace; use `-p 1` and do not run application processes with test credentials while tests execute.
 

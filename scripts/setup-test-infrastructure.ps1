@@ -1,7 +1,10 @@
+param([string]$DevelopmentEnvFile = '.env', [string]$TestEnvFile = '.env.test')
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'common.ps1')
 Push-Location (Join-Path $PSScriptRoot '..')
 try {
-    . .\scripts\load-test-env.ps1
+    if ($TestEnvFile -eq '.env.test' -and -not (Test-Path -LiteralPath $TestEnvFile)) { New-CloudEnv -Test }
+    . .\scripts\load-test-env.ps1 -Path $TestEnvFile
     $dbTarget = [Uri]$env:TEST_DATABASE_URL
     $brokerTarget = [Uri]$env:TEST_RABBITMQ_URL
     foreach ($target in @($dbTarget, $brokerTarget)) {
@@ -20,11 +23,11 @@ try {
     $brokerPassword = [Uri]::UnescapeDataString(($brokerTarget.UserInfo -split ':', 2)[1])
     if (-not $dbPassword -or -not $brokerPassword) { throw 'Test passwords are required.' }
     function Invoke-TestDocker {
-        $input | & docker @args
+        $input | & docker compose --env-file $DevelopmentEnvFile @args
         if ($LASTEXITCODE -ne 0) { throw 'Docker test infrastructure command failed.' }
     }
     # Compose expands only the development admin identity; never truncate it.
-    $adminUser = (Get-Content .env | Where-Object { $_ -match '^POSTGRES_USER=' }) -replace '^POSTGRES_USER=', ''
+    $adminUser = (Read-CloudEnv $DevelopmentEnvFile)['POSTGRES_USER']
     if (-not $adminUser) { throw 'POSTGRES_USER is required in .env for provisioning.' }
     $escapedPassword = $dbPassword.Replace("'", "''")
     $sql = @"
@@ -32,16 +35,16 @@ SELECT 'CREATE ROLE cloudforge_test LOGIN' WHERE NOT EXISTS (SELECT FROM pg_role
 ALTER ROLE cloudforge_test WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION PASSWORD '$escapedPassword';
 SELECT 'CREATE DATABASE cloudforge_test OWNER cloudforge_test' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'cloudforge_test') \gexec
 "@
-    $sql | Invoke-TestDocker compose exec -T db psql -v ON_ERROR_STOP=1 -U $adminUser.Trim() -d postgres
-    Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl add_vhost cloudforge_test
-    $users = Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl -q list_users
+    $sql | Invoke-TestDocker exec -T db psql -v ON_ERROR_STOP=1 -U $adminUser.Trim() -d postgres
+    Invoke-TestDocker exec -T rabbitmq rabbitmqctl add_vhost cloudforge_test
+    $users = Invoke-TestDocker exec -T rabbitmq rabbitmqctl -q list_users
     if ($users -match '^cloudforge_test\s') {
-        Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl change_password cloudforge_test $brokerPassword
+        Invoke-TestDocker exec -T rabbitmq rabbitmqctl change_password cloudforge_test $brokerPassword
     } else {
-        Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl add_user cloudforge_test $brokerPassword
+        Invoke-TestDocker exec -T rabbitmq rabbitmqctl add_user cloudforge_test $brokerPassword
     }
-    Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl set_user_tags cloudforge_test
-    Invoke-TestDocker compose exec -T rabbitmq rabbitmqctl set_permissions -p cloudforge_test cloudforge_test '.*' '.*' '.*'
+    Invoke-TestDocker exec -T rabbitmq rabbitmqctl set_user_tags cloudforge_test
+    Invoke-TestDocker exec -T rabbitmq rabbitmqctl set_permissions -p cloudforge_test cloudforge_test '.*' '.*' '.*'
     # Migration command uses DATABASE_URL; restore the caller's development value.
     $savedDatabaseURL = $env:DATABASE_URL
     try {

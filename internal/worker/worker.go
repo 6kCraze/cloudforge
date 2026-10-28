@@ -85,7 +85,7 @@ func (h *Handler) Handle(ctx context.Context, jobID string) (Outcome, error) {
 			if claimErr != nil {
 				return "", fmt.Errorf("claim delivered job: %w", claimErr)
 			}
-			h.logger.Info("job claimed", "job_id", jobID, "worker_id", h.workerID, "status", claimed.Status, "attempt_count", claimed.AttemptCount)
+			h.logger.Info("job claimed", "job_id", jobID, "worker_id", h.workerID, "status", claimed.Status, "attempt_count", claimed.AttemptCount, "attempt_id", claimed.AttemptID)
 			return h.execute(ctx, claimed)
 		default:
 			return "", fmt.Errorf("job %s has unsupported status %q", jobID, job.Status)
@@ -99,7 +99,7 @@ func (h *Handler) execute(ctx context.Context, job jobs.Job) (Outcome, error) {
 		return "", fmt.Errorf("claimed job has no attempt ID")
 	}
 	attemptID := *job.AttemptID
-	h.logger.Info("job started", "job_id", job.ID, "worker_id", h.workerID, "attempt_count", job.AttemptCount)
+	h.logger.Info("job started", "job_id", job.ID, "worker_id", h.workerID, "attempt_count", job.AttemptCount, "attempt_id", attemptID, "status", jobs.StatusRunning)
 	processCtx, cancel := context.WithCancel(ctx)
 	heartbeatDone := make(chan error, 1)
 	go func() {
@@ -135,20 +135,20 @@ func (h *Handler) execute(ctx context.Context, job jobs.Job) (Outcome, error) {
 			if markErr := h.store.MarkFailed(ctx, job.ID, h.workerID, attemptID, permanentCode(err), err.Error()); markErr != nil {
 				return "", fmt.Errorf("record permanent job failure: %w", markErr)
 			}
-			h.logger.Warn("job permanently failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "error", err)
+			h.logger.Warn("job permanently failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "attempt_count", job.AttemptCount, "status", jobs.StatusFailed, "error", err)
 			return OutcomeExecuted, nil
 		}
 		status, markErr := h.store.ScheduleRetry(ctx, job.ID, h.workerID, attemptID, "execution_failed", err.Error())
 		if markErr != nil {
 			return "", fmt.Errorf("record recoverable job failure: %w", markErr)
 		}
-		h.logger.Warn("job attempt failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "status", status, "error", err)
+		h.logger.Warn("job attempt failed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "attempt_count", job.AttemptCount, "status", status, "error", err)
 		return OutcomeExecuted, nil
 	}
 	if err := h.store.MarkSucceeded(ctx, job.ID, h.workerID, attemptID, result); err != nil {
 		return "", fmt.Errorf("record job success: %w", err)
 	}
-	h.logger.Info("job completed", "job_id", job.ID, "worker_id", h.workerID, "status", jobs.StatusSucceeded)
+	h.logger.Info("job completed", "job_id", job.ID, "worker_id", h.workerID, "attempt_id", attemptID, "attempt_count", job.AttemptCount, "status", jobs.StatusSucceeded)
 	return OutcomeExecuted, nil
 }
 
