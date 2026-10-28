@@ -44,6 +44,8 @@ Prerequisites: **Git**, **Go matching [go.mod](go.mod)** (currently 1.27), **Doc
 ```powershell
 git clone https://github.com/6kCraze/cloudforge.git
 cd cloudforge
+# V6 review: main still contains V5. Select the reviewed implementation first.
+git switch review/v6-portfolio
 .\scripts\dev.ps1 setup -PullImages
 .\scripts\dev.ps1 start
 ```

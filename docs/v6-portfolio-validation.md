@@ -57,6 +57,7 @@ These are the full V6 checkpoint-1 through checkpoint-3 changes reviewed for pub
 - Visual and format inspection found five JPEG screenshots named `.png`. They were renamed to `.jpg`, their links and inventory corrected, and all five SHA-256 values verified unchanged. The original demo inputs and generated thumbnail outputs remain PNGs.
 - All intended files were individually reviewed. No private-key/token pattern or machine-specific user path was found. Credential URL matches were generated CI variables, template replacements, or invalid test fixtures. Action SHA pins matched the official v7 tags. Runtime configuration, scratch material, user storage and binaries remained excluded.
 - Historical browser captures and the saved successful batch JSON were inspected under the sibling `cloudforge-release-evidence` directory. These are prior evidence, not a newly executed browser session. This review did not start local infrastructure, change development rows, or repeat heavy fault tests; hosted integration validates the review commit separately.
+- The V6 quick start explicitly switches a fresh clone to `review/v6-portfolio` before invoking the launcher, because the preserved V5 `main` does not contain that script. Release preparation should remove that temporary branch-selection step when V6 is merged.
 
 ## Resume wording grounded in the code and tests
 
