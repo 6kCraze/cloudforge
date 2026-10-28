@@ -6,7 +6,7 @@ A Go-based background processing platform using PostgreSQL, RabbitMQ, transactio
 
 ![CloudForge's real browser interface: an interactive infrastructure city](docs/images/overview.jpg)
 
-Latest release: **[v0.5.0](https://github.com/6kCraze/cloudforge/releases/tag/v0.5.0)**. The V6 portfolio and tooling changes are under review on `review/v6-portfolio`; the `v0.6.0` release is pending. See the [actual hosted CI runs](https://github.com/6kCraze/cloudforge/actions?query=branch%3Areview%2Fv6-portfolio) for validation status. This is a local development application, with no hosted public demo.
+Latest release: **[v0.6.0](https://github.com/6kCraze/cloudforge/releases/tag/v0.6.0)**. See the [actual hosted CI runs on main](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) for validation status. This is a local development application, with no hosted public demo.
 
 ## What it does
 
@@ -44,8 +44,6 @@ Prerequisites: **Git**, **Go matching [go.mod](go.mod)** (currently 1.27), **Doc
 ```powershell
 git clone https://github.com/6kCraze/cloudforge.git
 cd cloudforge
-# V6 review: main still contains V5. Select the reviewed implementation first.
-git switch review/v6-portfolio
 .\scripts\dev.ps1 setup -PullImages
 .\scripts\dev.ps1 start
 ```
@@ -83,7 +81,7 @@ Limits: **four files, 5 MiB each, 21 MiB per batch request, 8 megapixels and 8,1
 
 Integration tests refuse development targets and use `cloudforge_test`, a restricted role/vhost, and temporary storage. Stop application processes before shared integration tests. Deterministic two-worker processors prove concurrency without CPU stress. Heavy real process-crash and broker-interruption cases are explicit opt-in checks; they are not repeated just for screenshots.
 
-Local checks have passed. Real browser evidence includes upload → outbox → RabbitMQ → worker → PNG download, saved-batch reload, and controlled retry/failure presentation. **A completed green hosted run for the reviewed commit is required before release**; inspect the [actual GitHub Actions results](https://github.com/6kCraze/cloudforge/actions?query=branch%3Areview%2Fv6-portfolio). See [test isolation](docs/integration-testing.md), [CI coverage](docs/ci.md), [tooling validation](docs/v6-engineering-validation.md), and [portfolio validation](docs/v6-portfolio-validation.md).
+Local checks have passed. Real browser evidence includes upload → outbox → RabbitMQ → worker → PNG download, saved-batch reload, and controlled retry/failure presentation. GitHub Actions runs quality checks and isolated PostgreSQL/RabbitMQ integration tests; inspect the [actual results on main](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) for the release commit. See [test isolation](docs/integration-testing.md), [CI coverage](docs/ci.md), [tooling validation](docs/v6-engineering-validation.md), and [portfolio validation](docs/v6-portfolio-validation.md).
 
 ## Screenshots and a short demo
 

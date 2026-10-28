@@ -59,6 +59,10 @@ These are the full V6 checkpoint-1 through checkpoint-3 changes reviewed for pub
 - Historical browser captures and the saved successful batch JSON were inspected under the sibling `cloudforge-release-evidence` directory. These are prior evidence, not a newly executed browser session. This review did not start local infrastructure, change development rows, or repeat heavy fault tests; hosted integration validates the review commit separately.
 - The V6 quick start explicitly switches a fresh clone to `review/v6-portfolio` before invoking the launcher, because the preserved V5 `main` does not contain that script. Release preparation should remove that temporary branch-selection step when V6 is merged.
 
+## Hosted review and release verification
+
+The V6 review commit `1557e31dcd3be47395e24513ecaba11b94041839` subsequently passed [hosted quality and integration checks](https://github.com/6kCraze/cloudforge/actions/runs/40784182493). Final release preparation removes the temporary review-branch quick-start step and updates the README to `v0.6.0`; prior checkpoint statements above remain historical. The [release page](https://github.com/6kCraze/cloudforge/releases/tag/v0.6.0) identifies the tagged release, and [main CI](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) must match its merged commit.
+
 ## Resume wording grounded in the code and tests
 
 - Built CloudForge, a Go image-processing application that creates durable PostgreSQL jobs and outbox events, delivers work through RabbitMQ, and displays batch progress and downloadable thumbnails in a responsive browser UI.

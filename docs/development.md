@@ -11,7 +11,7 @@ CloudForge keeps PostgreSQL and RabbitMQ in Docker and runs the API, dispatcher,
 
 ## First run
 
-Until V6 is released on `main`, select `review/v6-portfolio` after cloning, as shown in the README. From the repository, run `./scripts/dev.ps1 setup -PullImages`, then `./scripts/dev.ps1 start`. The explicit PullImages switch downloads only PostgreSQL 17 and RabbitMQ 4 management images. Without it, the scripts use cached images or explain which image must be downloaded. Necessary Go modules may be downloaded by Go on a new machine; no optional browser or graphics packages are installed.
+Clone the repository's default `main` branch, as shown in the README. From the repository, run `./scripts/dev.ps1 setup -PullImages`, then `./scripts/dev.ps1 start`. The explicit PullImages switch downloads only PostgreSQL 17 and RabbitMQ 4 management images. Without it, the scripts use cached images or explain which image must be downloaded. Necessary Go modules may be downloaded by Go on a new machine; no optional browser or graphics packages are installed.
 
 Setup creates a missing `.env` with generated local database/broker passwords and matching URLs, starts the two infrastructure services, waits for their healthchecks, and runs the existing Goose migrations. It does not overwrite `.env`, reset a database, reverse migrations, or delete volumes. Inspect and back up existing databases before an upgrade. Migrations are deliberately separate from ordinary application startup.
 
