@@ -1,10 +1,10 @@
-# CloudForge — Fault-tolerant distributed job processing, demonstrated through real image workflows.
+# CloudForge
+
+**Fault-tolerant distributed job processing.**
 
 CloudForge is a **Go-based distributed background-processing platform** built with PostgreSQL, RabbitMQ, transactional messaging, concurrent workers, bounded retries, and automatic crash recovery.
 
 Its current practical application is **asynchronous image processing**: upload a small JPEG/PNG batch, let workers generate thumbnails in the background, and follow saved job states through to downloadable results.
-
-**Runs locally on your machine. There is no publicly hosted application.**
 
 ![CloudForge's real browser interface: an interactive infrastructure city](docs/images/overview.jpg)
 
@@ -25,6 +25,8 @@ Its current practical application is **asynchronous image processing**: upload a
 - **Reproducible verification:** isolated database/messaging integration tests, deterministic concurrency and fault tests, and hosted GitHub Actions checks support the implementation claims.
 
 ## Quick start · Windows
+
+**Runs locally on your machine. There is no publicly hosted application.**
 
 Prerequisites: **Git**, **Go matching [go.mod](go.mod)** (currently 1.27), **Docker Desktop with Compose and its Linux backend**, and **PowerShell 7 or Windows PowerShell 5.1**. Node.js is needed only for developer syntax checks, not application startup.
 
