@@ -1,43 +1,32 @@
-# CloudForge — Reliable Distributed Job Processing
+# CloudForge
 
-A Go-based background processing platform using PostgreSQL, RabbitMQ, transactional messaging, concurrent workers, and automatic crash recovery.
+**Fault-tolerant distributed job processing.**
 
-**Upload a small image batch. Follow its saved job states. Download the finished thumbnails.**
+CloudForge is a **Go-based distributed background-processing platform** built with PostgreSQL, RabbitMQ, transactional messaging, concurrent workers, bounded retries, and automatic crash recovery.
+
+Its current practical application is **asynchronous image processing**: upload a small JPEG/PNG batch, let workers generate thumbnails in the background, and follow saved job states through to downloadable results.
 
 ![CloudForge's real browser interface: an interactive infrastructure city](docs/images/overview.jpg)
 
-Latest release: **[v0.6.0](https://github.com/6kCraze/cloudforge/releases/tag/v0.6.0)**. See the [actual hosted CI runs on main](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) for validation status. This is a local development application, with no hosted public demo.
+[Quick start](#quick-start--windows) · [Architecture](docs/architecture.md) · [Reliability testing](docs/v5-recovery.md) · [Demo guide](docs/demo.md) · [v0.6.0 release](https://github.com/6kCraze/cloudforge/releases/tag/v0.6.0)
 
-## What it does
+## The application
 
-- Accepts one to four JPEG/PNG images and creates durable asynchronous jobs.
-- Generates proportional PNG thumbnails, including transparent images, through RabbitMQ and Go workers.
-- Shows actual PostgreSQL job states, worker identity, attempts, retry timing and available completion details.
-- Recovers abandoned jobs with leases, bounded retries and automatic redispatch.
-- Previews and downloads successful results; saved batch links restore status after reload.
+- Upload one to four JPEG/PNG images and generate proportional PNG thumbnails, including transparency.
+- Monitor actual job states, retry timing, worker identity, and latest attempt details.
+- Preview and download successful results, then reopen a saved batch link to retrieve its status.
 
-The original synthetic SHA-256 job API remains supported. The SVG city explains six infrastructure components; its routes are **illustrative architecture**, not live broker telemetry.
+## Engineering demonstrated
 
-![A real completed three-image batch with thumbnail previews](docs/images/workspace.jpg)
-
-## Architecture
-
-![CloudForge system design, including durable state, delivery, fenced ownership and recovery](docs/images/architecture.svg)
-
-PostgreSQL is the **source of truth** for lifecycle and attempts. RabbitMQ delivers work notifications. One dispatcher handles outbox publication and runs an independent recovery loop; workers execute under leased PostgreSQL ownership. Outputs use local, attempt-specific paths.
-
-| Mechanism | Why it matters |
-| --- | --- |
-| Transactional outbox | Job creation and delivery intent commit together, so accepting work does not require an available broker. |
-| Publisher confirms + mandatory routing | The dispatcher marks an event published only after routed broker acceptance; the gap before its database update can still produce duplicates. |
-| At-least-once delivery + atomic claims | Competing workers use PostgreSQL to elect the current owner even if notifications repeat. Manual ACK follows a durable processing decision; prefetch is one. |
-| Leases, heartbeats and bounded retries | Crashed ownership expires. Recovery schedules up to three total attempts and atomically requeues due work with a fresh outbox event. |
-| Attempt fencing | Worker and attempt identity plus a live lease protect terminal updates from stale owners. |
-| Attempt-specific image candidates | Retries do not overwrite another attempt's output. Only the saved winning reference is downloadable. |
-
-See the [architecture and lifecycle](docs/architecture.md) for transaction boundaries, failure windows and diagrams. [V5 ownership](docs/v5-safe-ownership.md) and [recovery validation](docs/v5-recovery.md) contain the detailed reliability evidence.
+- **Transactional consistency:** jobs and outbox events commit together, so accepting work does not require an available broker.
+- **Concurrent work delivery:** RabbitMQ competing consumers use manual acknowledgements and PostgreSQL atomic claims to handle duplicate notifications safely.
+- **Crash recovery:** leases, heartbeats, bounded retries, and automatic redispatch recover abandoned jobs.
+- **Result integrity:** attempt fencing and separate output paths stop stale workers from replacing the accepted result.
+- **Reproducible verification:** isolated database/messaging integration tests, deterministic concurrency and fault tests, and hosted GitHub Actions checks support the implementation claims.
 
 ## Quick start · Windows
+
+**Runs locally on your machine. There is no publicly hosted application.**
 
 Prerequisites: **Git**, **Go matching [go.mod](go.mod)** (currently 1.27), **Docker Desktop with Compose and its Linux backend**, and **PowerShell 7 or Windows PowerShell 5.1**. Node.js is needed only for developer syntax checks, not application startup.
 
@@ -52,12 +41,7 @@ First setup creates a missing `.env` with generated local credentials, starts Po
 
 Open **[localhost:8080](http://localhost:8080/)** → **Launch workspace** → **Choose images**. Select the three small [included demo images](samples/README.md), then **Process 3 images**. Small jobs can finish between polls; the interface does not invent a visible running interval. Expand **Latest attempt details**, download a PNG, and reload the saved batch link.
 
-The foreground launcher runs the API, dispatcher and **one worker** as local Go processes. Only PostgreSQL and RabbitMQ use Docker. No frontend build, Node server, application image build, or graphics framework is required.
-
-```powershell
-# In another terminal, inspect actual service readiness and broker counters:
-.\scripts\dev.ps1 status
-```
+The foreground launcher runs the API, dispatcher and **one worker** as local Go processes. Only PostgreSQL and RabbitMQ use Docker. No frontend build or application container build is required. Use `dev.ps1 status` from another terminal to inspect service readiness and broker counters.
 
 To stop: press **Ctrl+C once** in the foreground start terminal, let the Go processes finish, then run:
 
@@ -71,27 +55,40 @@ See [setup, configuration and troubleshooting](docs/development.md). API and wor
 
 Limits: **four files, 5 MiB each, 21 MiB per batch request, 8 megapixels and 8,192 pixels per side**. Thumbnails fit within **320 × 320** without upscaling. Storage has a conservative 256 MiB local admission budget. [API and storage details](docs/v4-image-workflow.md).
 
+## Architecture
+
+![CloudForge system design, including durable state, delivery, fenced ownership and recovery](docs/images/architecture.svg)
+
+**PostgreSQL is the source of truth** for job lifecycle, attempts, retry decisions, and output references. **RabbitMQ delivers work notifications.** One dispatcher publishes outbox events with confirmations and runs a separate recovery loop; workers claim jobs under leased database ownership and write attempt-specific outputs.
+
+The browser's infrastructure city explains these responsibilities. Its routes are **illustrative architecture**, not live broker telemetry or a measured worker count.
+
+Read the [architecture and lifecycle](docs/architecture.md) for transaction boundaries and failure windows, [worker ownership](docs/v5-safe-ownership.md) for fencing, and [recovery and fault evidence](docs/v5-recovery.md) for the reliability validation. The original synthetic SHA-256 API remains supported; [engineering history](docs/engineering-history.md) explains how the system evolved.
+
 ## Testing and evidence
 
 ```powershell
 .\scripts\test.ps1                       # formatting, JS syntax, script safety, build, Go tests and vet
+# Integration: infrastructure running, application processes stopped.
 .\scripts\setup-test-infrastructure.ps1  # existing containers; restricted test database/account/vhost
 .\scripts\test.ps1 -Integration          # sequential real database/messaging/image/recovery checks
 ```
 
 Integration tests refuse development targets and use `cloudforge_test`, a restricted role/vhost, and temporary storage. Stop application processes before shared integration tests. Deterministic two-worker processors prove concurrency without CPU stress. Heavy real process-crash and broker-interruption cases are explicit opt-in checks; they are not repeated just for screenshots.
 
-Local checks have passed. Real browser evidence includes upload → outbox → RabbitMQ → worker → PNG download, saved-batch reload, and controlled retry/failure presentation. GitHub Actions runs quality checks and isolated PostgreSQL/RabbitMQ integration tests; inspect the [actual results on main](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) for the release commit. See [test isolation](docs/integration-testing.md), [CI coverage](docs/ci.md), [tooling validation](docs/v6-engineering-validation.md), and [portfolio validation](docs/v6-portfolio-validation.md).
+The [v0.6.0 main CI run passed](https://github.com/6kCraze/cloudforge/actions/runs/40786060526). [Current main CI](https://github.com/6kCraze/cloudforge/actions?query=branch%3Amain) records later outcomes. Real browser evidence includes upload → outbox → RabbitMQ → worker → PNG download, saved-batch reload, and controlled retry/failure presentation. See [test isolation](docs/integration-testing.md), [CI coverage](docs/ci.md), [tooling validation](docs/v6-engineering-validation.md), and [portfolio/browser evidence](docs/v6-portfolio-validation.md) for what each check proves and what remains unverified. No throughput, uptime, or production-scale benchmark is claimed.
 
-## Screenshots and a short demo
+## Product demo and screenshots
+
+![A real completed three-image batch with thumbnail previews](docs/images/workspace.jpg)
 
 [Desktop workspace](docs/images/workspace.jpg) · [Worker/attempt details](docs/images/job-details.jpg) · [Mobile](docs/images/mobile.jpg) · [Controlled retry/failure evidence](docs/images/retry-test-evidence.jpg).
 
 All are authentic local browser captures. The retry screenshot uses deterministic isolated test faults, not production telemetry or a development crash. [Sample artwork and credits](samples/README.md) are included. [Recording steps and a 60–90 second narration](docs/demo.md) make the demo reproducible; no recording is claimed.
 
-## Boundaries
+## Scope and limitations
 
-- Single-machine local deployment and shared filesystem; no authentication or cloud deployment.
+- Single-machine local deployment and shared filesystem; no authentication or hosted service. Default API and Docker port bindings are not restricted to loopback; keep this development setup off untrusted networks.
 - At-least-once delivery, not exactly-once execution. Duplicate CPU work is possible; fenced commits protect the accepted result.
 - Input/candidate orphans are retained; automatic storage reconciliation and garbage collection are not implemented.
 - One dispatcher is supported. Malformed events are retained and logged; a full oldest batch of malformed events can still starve later rows.
